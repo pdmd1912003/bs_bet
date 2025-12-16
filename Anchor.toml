@@ -6,7 +6,7 @@ resolution = true
 skip-lint = false
 
 [programs.devnet]
-bs_bet = "E4MP3Jxewmyu9f5bvyns3C9wMXX7AynzrCe9hD3ed3kU"
+bs_bet = "3mhGnRYHNYJ4BMa5P7aGd9DYn3wSwxELNSYqNzRVbtKx"
 
 [registry]
 url = "https://api.apr.dev"

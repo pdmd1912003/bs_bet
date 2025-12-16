@@ -591,6 +591,12 @@ export default function BetForm() {
             return;
         }
 
+        if (!userProfilePda || !activeBetPda) {
+            setActionFeedbackMessage("Profile/ActiveBet PDA not ready for disabling Quick Bets.");
+            setLoading(false);
+            return;
+        }
+
         setLoading(true);
 
         try {
@@ -598,8 +604,7 @@ export default function BetForm() {
             console.log("User Authority (wallet):", userAuthority.toBase58());
             console.log("UserAuthState PDA:", userAuthStatePda.toBase58());
             console.log("UserProfile PDA:", userProfilePda?.toBase58());
-                        console.log("ActiveBet PDA:", activeBetPda?.toBase58());
-                        console.log("ActiveBet PDA:", activeBetPda?.toBase58());
+            console.log("ActiveBet PDA:", activeBetPda?.toBase58());
             console.log("isDelegated (React state):", isDelegated);
             
             // 1) Lấy thông tin UserAuthState để biết owner hiện tại
@@ -626,13 +631,10 @@ export default function BetForm() {
                 const undelegateTx = await l1Program.methods
                     .manageDelegation(0, Buffer.from([]), new Array(64).fill(0) as any)
                     .accounts({
-                        payer: userAuthority,
                         userAuthState: userAuthStatePda,
                         userAuthority: userAuthority,
                         systemProgram: SystemProgram.programId,
                         ixSysvar: anchor.web3.SYSVAR_INSTRUCTIONS_PUBKEY,
-                        magicProgram: null,
-                        magicContext: null,
                     } as any)
                     .rpc({ commitment: "confirmed" });
 
@@ -644,15 +646,68 @@ export default function BetForm() {
 
             // CASE 2: Owner là MagicBlock program → cần config thêm để undelegate
             if (owner === magicProgramId) {
-                console.warn("[handleUndelegate] UserAuthState is fully delegated to MagicBlock.");
-                console.warn("To undelegate, we need the correct MagicBlock context account.");
-                console.warn("This requires additional MagicBlock SDK setup (see MagicBlock docs).");
-                
+                if (!ephemeralProgram || !ephemeralProviderRef.current) {
+                    setActionFeedbackMessage(
+                        "Quick Bets is delegated, but MagicBlock provider/program is not ready for undelegation."
+                    );
+                    setLoading(false);
+                    return;
+                }
+
+                // Make sure ALL PDAs are currently delegated (owned by delegation program)
+                const [profileInfo, betInfo] = await Promise.all([
+                    l1Program.provider.connection.getAccountInfo(userProfilePda),
+                    l1Program.provider.connection.getAccountInfo(activeBetPda),
+                ]);
+                if (!profileInfo || !betInfo) {
+                    setActionFeedbackMessage(
+                        "Missing UserProfile/ActiveBet accounts; cannot safely undelegate."
+                    );
+                    setLoading(false);
+                    return;
+                }
+                const profileOwner = profileInfo.owner.toBase58();
+                const betOwner = betInfo.owner.toBase58();
+                if (profileOwner !== magicProgramId || betOwner !== magicProgramId) {
+                    setActionFeedbackMessage(
+                        `Inconsistent delegation owners. auth=${owner}, profile=${profileOwner}, bet=${betOwner}. Cannot safely undelegate.`
+                    );
+                    setLoading(false);
+                    return;
+                }
+
+                setActionFeedbackMessage("Disabling Quick Bets (undelegating from MagicBlock)...");
+
+                const undelegateFromMbTx = await ephemeralProgram.methods
+                    .undelegateFromMagicblock()
+                    .accounts({
+                        payer: userAuthority,
+                        userAuthority: userAuthority,
+                        userAuthStateToUndelegate: userAuthStatePda,
+                        userProfileToUndelegate: userProfilePda,
+                        activeBetToUndelegate: activeBetPda,
+                        magicProgram: MAGICBLOCK_MAGIC_PROGRAM_ID,
+                        magicContext: MAGICBLOCK_MAGIC_CONTEXT,
+                    } as any)
+                    .rpc({ commitment: "confirmed" });
+
+                console.log("✅ Undelegated from MagicBlock tx:", undelegateFromMbTx);
+
+                // After ownership is returned, flip our local on-chain flag on L1.
+                const flipTx = await l1Program.methods
+                    .manageDelegation(0, Buffer.from([]), new Array(64).fill(0) as any)
+                    .accounts({
+                        userAuthState: userAuthStatePda,
+                        userAuthority: userAuthority,
+                        systemProgram: SystemProgram.programId,
+                        ixSysvar: anchor.web3.SYSVAR_INSTRUCTIONS_PUBKEY,
+                    } as any)
+                    .rpc({ commitment: "confirmed" });
+
                 setActionFeedbackMessage(
-                    "⚠️ Quick Bets fully enabled via MagicBlock. " +
-                    "Disabling requires additional MagicBlock configuration (context account). " +
-                    "For now, you can continue using Quick Bets or create a new profile to use standard mode."
+                    `Successfully Disabled Quick Bets! UndelegateTx: ${undelegateFromMbTx}, FlagTx: ${flipTx}`
                 );
+                await fetchUserAuthStateData();
                 setLoading(false);
                 return;
             }
