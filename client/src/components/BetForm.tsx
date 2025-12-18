@@ -9,22 +9,24 @@ import { Connection as SolanaConnection, PublicKey, SystemProgram, Keypair, Tran
 import { useSolanaWallet } from "../hooks/useSolanaWallet";
 import { signAndFormatMessage } from "../utils/signUtils";
 
-// Civic interfaces - Commented out, using standard wallet adapter
-// interface CivicWallet {
-//     publicKey: PublicKey;
-//     signTransaction: (transaction: Transaction) => Promise<Transaction>;
-//     signAllTransactions: (transactions: Transaction[]) => Promise<Transaction[]>;
-//     signMessage: (message: Uint8Array) => Promise<Uint8Array>;
-// }
-//
-// interface CivicUser {
-//     wallet: CivicWallet;
-// }
+export type ClientActiveBet = {
+    user: PublicKey;
+    assetName: string;
+    initialPrice: number;
+    expiryTimestamp: number;
+    direction: number;
+    amountStaked: number;
+    resolvedPrice: number;
+    status: number;
+    bump: number;
+};
 
-export type ClientActiveBet = { /* ... (same as before) ... */ };
 // Read constants from environment variables
 const PYTH_SOL_USD_PRICE_ACCOUNT = new anchor.web3.PublicKey(
     process.env.NEXT_PUBLIC_PYTH_SOL_USD_PRICE_ACCOUNT || "7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE"
+);
+const PROGRAM_ID = new anchor.web3.PublicKey(
+    process.env.NEXT_PUBLIC_BSBET_PROGRAM_ID || "3awHJrzJbNCCLcQNEdh5mcVfPZW55w5v7tQhDwkx7Hpt"
 );
 // MagicBlock RPC Endpoint
 const MAGICBLOCK_RPC_ENDPOINT = process.env.NEXT_PUBLIC_MAGICBLOCK_RPC_URL || "https://devnet.magicblock.app/";
@@ -64,6 +66,7 @@ const formatActionFeedbackMessage = (message: string) => {
         return (
             <span>
                 {beforeTx}Tx: <a
+                    href={`https://explorer.solana.com/tx/${txSig}?cluster=devnet`}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-blue-400 hover:underline"
@@ -107,12 +110,11 @@ export default function BetForm() {
 
     const [userProfilePda, setUserProfilePda] = useState<PublicKey | null>(null);
     const [userAuthStatePda, setUserAuthStatePda] = useState<PublicKey | null>(null);
-    const [activeBetPda, setActiveBetPda] = useState<PublicKey | null>(null);
     const [profileData, setProfileData] = useState<Record<string, unknown> | null>(null);
     const [authStateData, setAuthStateData] = useState<Record<string, unknown> | null>(null);
     const [displayableBets, setDisplayableBets] = useState<DisplayableActiveBet[]>([]);
 
-    const userPoints = profileData ? Number(profileData.points) : 1000;
+    const userPoints = profileData ? Number(profileData.points) : 0; // Don't show 1000 until profile is actually created
     const fixedBetAmount = 10;
     const isProfileInitialized = !!profileData;
     const isDelegated = authStateData ? authStateData.isDelegated : false;
@@ -182,20 +184,11 @@ export default function BetForm() {
                     [Buffer.from("auth_state"), userAuthority.toBuffer()], l1Program.programId
                 );
                 setUserAuthStatePda(authStatePdaRet);
-
-                const [activeBetPdaRet] = anchor.web3.PublicKey.findProgramAddressSync(
-                    [Buffer.from("active_bet"), userAuthority.toBuffer()], l1Program.programId
-                );
-                setActiveBetPda(activeBetPdaRet);
                 setActionFeedbackMessage('PDAs derived.');
             } catch (error) {
                 console.error("Error deriving PDAs:", error);
             }
-        } else {
-            setUserProfilePda(null);
-            setUserAuthStatePda(null);
-            setActiveBetPda(null);
-        }
+        } else { /* ... clear PDAs ... */ }
     }, [l1Program, userAuthority, userWallet]);
 
     // Fetch functions use L1 program to get ground truth state
@@ -206,21 +199,8 @@ export default function BetForm() {
             setProfileData(data);
         }
         catch (e) {
-            // When delegated to MagicBlock, the owner may not be our program, so Anchor fetch can fail.
-            // Fallback: getAccountInfo + coder decode (works regardless of owner).
-            try {
-                const info = await l1Program.provider.connection.getAccountInfo(userProfilePda, { commitment: "confirmed" });
-                if (!info) {
-                    setProfileData(null);
-                    return;
-                }
-                const decoded = l1Program.coder.accounts.decode<any>("userProfile", info.data);
-                setProfileData(decoded);
-            } catch (inner) {
-                setProfileData(null);
-                console.warn("Fetch profile L1 error", e);
-                console.warn("Fetch profile fallback decode error", inner);
-            }
+            setProfileData(null);
+            console.warn("Fetch profile L1 error", e);
         }
     }, [l1Program, userProfilePda]);
 
@@ -230,22 +210,9 @@ export default function BetForm() {
             const data = await l1Program.account.userAuthState.fetch(userAuthStatePda);
             setAuthStateData(data);
         }
-        catch (e: any) {
-            // When delegated to MagicBlock, the owner may not be our program, so Anchor fetch can fail.
-            // Fallback: getAccountInfo + coder decode (works regardless of owner).
-            try {
-                const info = await l1Program.provider.connection.getAccountInfo(userAuthStatePda, { commitment: "confirmed" });
-                if (!info) {
-                    setAuthStateData(null);
-                    return;
-                }
-                const decoded = l1Program.coder.accounts.decode<any>("userAuthState", info.data);
-                setAuthStateData(decoded);
-            } catch (inner: any) {
-                setAuthStateData(null);
-                console.warn("Fetch auth L1 error:", e?.message || e);
-                console.warn("Fetch auth fallback decode error:", inner?.message || inner);
-            }
+        catch (e) {
+            setAuthStateData(null);
+            console.warn("Fetch auth L1 error", e);
         }
     }, [l1Program, userAuthStatePda]);
 
@@ -259,44 +226,28 @@ export default function BetForm() {
     }, [userProfilePda, userAuthStatePda, l1Program, fetchUserProfileData, fetchUserAuthStateData]);
 
     const handleCreateUserProfile = useCallback(async () => {
-        if (!l1Program || !userAuthority || !userProfilePda || !userAuthStatePda || !activeBetPda) {
-            setActionFeedbackMessage("Program not ready");
-            return;
-        }
-        
+        if (!l1Program || !userAuthority || !userProfilePda || !userAuthStatePda) return;
         setLoading(true);
         setActionFeedbackMessage("Creating profile...");
-        
         try {
-            console.log("🚀 Calling create_user_profile instruction");
-            console.log("UserProfilePda:", userProfilePda.toBase58());
-            console.log("UserAuthStatePda:", userAuthStatePda.toBase58());
-            console.log("ActiveBetPda:", activeBetPda.toBase58());
-            console.log("UserAuthority:", userAuthority.toBase58());
-            
-            const tx = await l1Program.methods.createUserProfile()
-                .accounts({
-                    payer: userAuthority,
-                    userProfile: userProfilePda,
-                    userAuthStateForProfileCreation: userAuthStatePda,
-                    activeBet: activeBetPda,
-                    userAuthority: userAuthority,
-                    systemProgram: SystemProgram.programId,
-                } as any)
-                .rpc({ commitment: "confirmed" });
-            
-            console.log("✅ Profile created! Tx:", tx);
+            console.group("[bs_bet] createUserProfile");
+            console.log("userAuthority:", userAuthority.toBase58());
+            console.log("userProfilePda:", userProfilePda.toBase58());
+            console.log("userAuthStatePda:", userAuthStatePda.toBase58());
+            console.log("programId:", l1Program.programId.toBase58());
+            const tx = await l1Program.methods.createUserProfile().accounts({
+                userProfile: userProfilePda,
+                userAuthStateForProfileCreation: userAuthStatePda,
+                userAuthority: userAuthority,
+                systemProgram: SystemProgram.programId,
+            } as any).rpc({ commitment: "confirmed" });
+            console.log("tx:", tx);
             setActionFeedbackMessage(`Profile initialized! Tx: ${tx}`);
-            
-            // Wait for confirmation and fetch data
             await new Promise(resolve => setTimeout(resolve, 2000));
             await fetchUserProfileData();
             await fetchUserAuthStateData();
-            
         } catch (err: any) {
-            console.error("❌ Error creating user profile:", err);
-            
-            // Check if accounts already exist
+            console.error("Error creating user profile:", err);
             if (err.message?.includes("already in use") || err.message?.includes("custom program error: 0x0")) {
                 setActionFeedbackMessage("Profile already exists! Refreshing data...");
                 await fetchUserProfileData();
@@ -305,35 +256,47 @@ export default function BetForm() {
                 setActionFeedbackMessage(`Failed: ${err.message || String(err)}`);
             }
         } finally {
+            console.groupEnd();
             setLoading(false);
         }
-    }, [l1Program, userAuthority, userProfilePda, userAuthStatePda, activeBetPda, fetchUserProfileData, fetchUserAuthStateData]);
+    }, [l1Program, userAuthority, userProfilePda, userAuthStatePda, fetchUserProfileData, fetchUserAuthStateData]);
 
     const fetchAndDisplayActiveBets = useCallback(async () => {
-        if (!l1Program || !userAuthority || !activeBetPda) {
+        if (!l1Program || !userAuthority) {
             setDisplayableBets([]);
             return;
         }
-
         try {
-            const info = await l1Program.provider.connection.getAccountInfo(activeBetPda, { commitment: "confirmed" });
-            if (!info) {
-                setDisplayableBets([]);
-                return;
+            const storedBetKeys = JSON.parse(
+                localStorage.getItem(`activeBets_${userAuthority.toBase58()}`) || '[]'
+            );
+            const bets: DisplayableActiveBet[] = [];
+            for (const keyStr of storedBetKeys) {
+                try {
+                    const betPubkey = new PublicKey(keyStr);
+                    const betData = await l1Program.account.activeBet.fetch(betPubkey);
+                    bets.push({
+                        user: betData.user,
+                        assetName: betData.assetName,
+                        initialPrice: Number(betData.initialPrice),
+                        expiryTimestamp: Number(betData.expiryTimestamp),
+                        direction: betData.direction,
+                        amountStaked: Number(betData.amountStaked),
+                        resolvedPrice: Number(betData.resolvedPrice),
+                        status: betData.status,
+                        bump: (betData as any).bump || 0,
+                        publicKey: keyStr,
+                    } as DisplayableActiveBet);
+                } catch (e) {
+                    console.warn(`Failed to fetch bet ${keyStr}:`, e);
+                }
             }
-
-            const decoded = l1Program.coder.accounts.decode<any>("activeBet", info.data);
-            setDisplayableBets([
-                {
-                    ...(decoded as any),
-                    publicKey: activeBetPda.toBase58(),
-                } as any,
-            ]);
+            setDisplayableBets(bets);
         } catch (e) {
-            console.warn("Fetch active bet error", e);
+            console.warn('Error fetching active bets:', e);
             setDisplayableBets([]);
         }
-    }, [l1Program, userAuthority, activeBetPda]);
+    }, [l1Program, userAuthority]);
 
     useEffect(() => { if (l1Program && userAuthority) fetchAndDisplayActiveBets(); }, [l1Program, userAuthority, fetchAndDisplayActiveBets]);
 
@@ -342,73 +305,72 @@ export default function BetForm() {
         process.env.NEXT_PUBLIC_MAGICBLOCK_DELEGATION_PROGRAM_ID || "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"
     );
 
-    // Required by #[commit] ephemeral instructions in the IDL. Defaults come from the IDL.
-    const MAGICBLOCK_MAGIC_PROGRAM_ID = new anchor.web3.PublicKey(
-        process.env.NEXT_PUBLIC_MAGICBLOCK_MAGIC_PROGRAM_ID || "Magic11111111111111111111111111111111111111"
-    );
-    const MAGICBLOCK_MAGIC_CONTEXT = new anchor.web3.PublicKey(
-        process.env.NEXT_PUBLIC_MAGICBLOCK_MAGIC_CONTEXT || "MagicContext1111111111111111111111111111111"
-    );
+    const checkUserAuthState = useCallback(async () => {
+        if (!l1Program || !userAuthStatePda) return;
+        try {
+            const info = await l1Program.provider.connection.getAccountInfo(userAuthStatePda);
+            console.log("=== UserAuthState Debug Info ===");
+            console.log("PDA Address:", userAuthStatePda.toBase58());
+            if (!info) {
+                console.log("❌ Account does NOT exist");
+                return null;
+            }
+            console.log("✅ Account exists");
+            console.log("Owner:", info.owner.toBase58());
+            console.log("Data length:", info.data.length);
+            console.log("Discriminator (first 8 bytes):", Array.from(info.data.slice(0, 8)));
+            try {
+                const decoded = l1Program.coder.accounts.decode<any>("userAuthState", info.data);
+                console.log("Decoded data:", decoded);
+                return decoded;
+            } catch (e) {
+                console.error("Failed to decode:", e);
+                return null;
+            }
+        } catch (e) {
+            console.error("Error checking UserAuthState:", e);
+            return null;
+        }
+    }, [l1Program, userAuthStatePda]);
 
     const handleDelegate = async () => {
-        if (!l1Program || !userAuthority || !userProfilePda || !userAuthStatePda || !activeBetPda || !userWallet?.signMessage) {
+        if (!l1Program || !userAuthority || !userAuthStatePda || !userWallet?.signMessage) {
             setActionFeedbackMessage("Wallet/Program not ready for delegation.");
             setLoading(false); return;
         }
 
         setLoading(true);
         setActionFeedbackMessage("Checking current delegation status...");
+        
+        // Debug: Check UserAuthState
+        await checkUserAuthState();
 
         try {
-            // ========== DEBUG: CHECK BOTH ACCOUNTS ==========
-            console.log("🔍 Checking accounts...");
-            console.log("UserProfilePda:", userProfilePda?.toBase58());
-            console.log("UserAuthStatePda:", userAuthStatePda?.toBase58());
-            console.log("ActiveBetPda:", activeBetPda?.toBase58());
-            
-            // Check UserProfile first
-            const profileAccountInfo = await l1Program.provider.connection.getAccountInfo(userProfilePda!);
-            console.log("UserProfile exists?", profileAccountInfo !== null);
+            console.group("[bs_bet] Enable Quick Bets (delegate)");
+            console.log("programId:", l1Program.programId.toBase58());
+            console.log("userAuthority:", userAuthority.toBase58());
+            console.log("userAuthStatePda:", userAuthStatePda.toBase58());
+            try {
+                const [derived] = anchor.web3.PublicKey.findProgramAddressSync(
+                    [Buffer.from("auth_state"), userAuthority.toBuffer()],
+                    l1Program.programId
+                );
+                console.log("derivedUserAuthStatePda:", derived.toBase58(), "match?", derived.equals(userAuthStatePda));
+            } catch (e) {
+                console.warn("Failed to derive PDA for debug:", e);
+            }
 
-            // Check ActiveBet
-            const activeBetAccountInfo = await l1Program.provider.connection.getAccountInfo(activeBetPda);
-            console.log("ActiveBet exists?", activeBetAccountInfo !== null);
-            
-            // Check UserAuthState
             const authStateAccountInfo = await l1Program.provider.connection.getAccountInfo(userAuthStatePda);
-            console.log("UserAuthState exists?", authStateAccountInfo !== null);
-            console.log("UserAuthState owner:", authStateAccountInfo?.owner.toBase58());
-            console.log("Expected program ID:", l1Program.programId.toBase58());
-            console.log("MagicBlock program ID:", MAGICBLOCK_DELEGATION_PROGRAM_ID.toBase58());
-            
-            if (authStateAccountInfo) {
-                const actualDisc = Array.from(authStateAccountInfo.data.slice(0, 8));
-                console.log("UserAuthState data length:", authStateAccountInfo.data.length);
-                console.log("UserAuthState first 16 bytes:", Array.from(authStateAccountInfo.data.slice(0, 16)));
-                console.log("UserAuthState discriminator (first 8 bytes):", actualDisc);
-                console.log("UserAuthState data hex (first 64 chars):", Buffer.from(authStateAccountInfo.data).toString('hex').slice(0, 64));
-            }
-            
-            if (!profileAccountInfo) {
-                setActionFeedbackMessage("❌ UserProfile not found! Please click 'Initialize Profile (1000 pts)' first.");
-                setLoading(false);
-                return;
-            }
+            console.log("L1 getAccountInfo(owner):", authStateAccountInfo?.owner?.toBase58() ?? "<null>");
 
-            if (!activeBetAccountInfo) {
-                setActionFeedbackMessage("❌ ActiveBet PDA not found! Please click 'Initialize Profile (1000 pts)' first.");
-                setLoading(false);
-                return;
-            }
-            
             if (!authStateAccountInfo) {
-                // UserAuthState doesn't exist - need to create profile first
-                setActionFeedbackMessage("❌ UserAuthState not found! Please click 'Initialize Profile (1000 pts)' first.");
+                setActionFeedbackMessage(
+                    "❌ UserAuthState not found! Please click 'Initialize Profile (1000 pts)' first to create all required accounts."
+                );
                 console.error("UserAuthState PDA not found at:", userAuthStatePda.toBase58());
                 setLoading(false);
                 return;
             }
-            // ========== END DEBUG ==========
 
             if (authStateAccountInfo) {
                 // Account EXISTS. Check owner.
@@ -422,55 +384,34 @@ export default function BetForm() {
                         setAuthStateData({ ...(authStateData || {}), isDelegated: true });
                     }
                     setLoading(false);
+                    console.log("Already delegated: owner is MagicBlock delegation program");
+                    console.groupEnd();
                     return;
                 } else if (authStateAccountInfo.owner.equals(l1Program.programId)) {
                     // Owned by OUR program. Try to decode OUR UserAuthState data.
-                    let decodedData;
-                    try {
-                        // ❌ SAI: "UserAuthState" không tồn tại trong IDL
-                        // decodedData = l1Program.coder.accounts.decode<any>("UserAuthState", authStateAccountInfo.data);
-
-                        // ✅ ĐÚNG: tên account trong IDL là "userAuthState"
-                        decodedData = l1Program.coder.accounts.decode<any>("userAuthState", authStateAccountInfo.data);
-                    } catch (decodeError: any) {
-                        console.error("❌ Failed to decode UserAuthState via IDL name 'userAuthState':", decodeError);
-                        console.error("Account discriminator (actual, first 8 bytes):", Array.from(authStateAccountInfo.data.slice(0, 8)));
-                        console.error("Expected discriminator (from Rust build):", [243, 187, 102, 170, 18, 136, 71, 213]);
-                        console.error("Account address:", userAuthStatePda.toBase58());
-                        console.error("Account owner:", authStateAccountInfo.owner.toBase58());
-                        console.error("Program ID (client):", l1Program.programId.toBase58());
-                        console.error("Data length:", authStateAccountInfo.data.length);
-                        console.error("Data (hex, first 128 chars):", Buffer.from(authStateAccountInfo.data).toString('hex').slice(0, 128));
-                        
-                        setActionFeedbackMessage(
-                            "❌ Internal error reading Quick Bets state. " +
-                            "Please refresh the page, and if it still fails, try 'Initialize Profile' again."
-                        );
-                        setLoading(false);
-                        return;
-                    }
-                    
+                    const decodedData = l1Program.coder.accounts.decode<any>("userAuthState", authStateAccountInfo.data);
                     const currentNonce = decodedData.nonce;
                     const alreadyBizDelegated = decodedData.isDelegated; // Our program's flag
+
+                    console.log("decoded.isDelegated:", alreadyBizDelegated);
+                    console.log("decoded.nonce:", currentNonce?.toString?.() ?? String(currentNonce));
 
                     if (alreadyBizDelegated) {
                         // Our program set is_delegated=true (manage_delegation step 1 done),
                         // but MB doesn't own it yet. This means delegate_auth_state (MB SDK call) needs to run.
                         setActionFeedbackMessage("Ready for MagicBlock SDK. Attempting MagicBlock delegation (Step 2)...");
                         await l1Program.methods.delegateAuthState()
-                            .accounts({ payer: userAuthority, userAuthority: userAuthority, pda: userAuthStatePda } as any)
+                            .accounts({ payer: userAuthority, pda: userAuthStatePda } as any)
                             .rpc({ commitment: "confirmed" });
-                        await l1Program.methods.delegateUserProfile()
-                            .accounts({ payer: userAuthority, userAuthority: userAuthority, pda: userProfilePda } as any)
-                            .rpc({ commitment: "confirmed" });
-                        await l1Program.methods.delegateActiveBet()
-                            .accounts({ payer: userAuthority, userAuthority: userAuthority, pda: activeBetPda } as any)
-                            .rpc({ commitment: "confirmed" });
+
+                        const postDelegateInfo = await l1Program.provider.connection.getAccountInfo(userAuthStatePda);
+                        console.log("post-delegate owner:", postDelegateInfo?.owner?.toBase58() ?? "<null>");
                         setActionFeedbackMessage("Successfully Enabled Quick Bets (MagicBlock SDK Confirmed)!");
                         // After this, owner has changed. fetchUserAuthStateData will fail.
                         // Optimistically update client state.
                         setAuthStateData({ ...decodedData, isDelegated: true }); // Keep existing data, update flag
                         setLoading(false);
+                        console.groupEnd();
                         return;
                     }
                     // If owned by us and not bizDelegated, proceed to full delegation flow below (sign message etc.)
@@ -479,39 +420,24 @@ export default function BetForm() {
                 } else {
                     // Owned by some other unexpected program
                     setActionFeedbackMessage(`Error: Auth State PDA has an unexpected owner: ${authStateAccountInfo.owner.toBase58()}`);
-                    setLoading(false); return;
+                    setLoading(false);
+                    console.groupEnd();
+                    return;
                 }
+            } else {
+                // UserAuthState PDA does not exist, will be created by manage_delegation
+                setActionFeedbackMessage("New user for delegation. Starting process (Step 1: Sign Message)...");
+                // Fall through to sign message and call manageDelegation (currentNonce will be new BN(0))
             }
 
-            // If we are here, UserAuthState exists, is owned by us, and is_delegated is false.
+            // If we are here, UserAuthState either doesn't exist or is owned by us and is_delegated is false.
             // We need to run manage_delegation (Step 1) then delegate_auth_state (Step 2).
-            
-            // Decode the current nonce from the account
-            let decodedAuthState;
-            try {
-                // ❌ SAI:
-                // decodedAuthState = l1Program.coder.accounts.decode<any>("UserAuthState", authStateAccountInfo.data);
-
-                // ✅ ĐÚNG:
-                decodedAuthState = l1Program.coder.accounts.decode<any>("userAuthState", authStateAccountInfo.data);
-            } catch (decodeError: any) {
-                console.error("❌ Failed to decode UserAuthState for nonce via IDL name 'userAuthState':", decodeError);
-                console.error("Account discriminator (actual, first 8 bytes):", Array.from(authStateAccountInfo.data.slice(0, 8)));
-                console.error("Expected discriminator (from Rust build):", [243, 187, 102, 170, 18, 136, 71, 213]);
-                console.error("Account address:", userAuthStatePda.toBase58());
-                console.error("Account owner:", authStateAccountInfo.owner.toBase58());
-                console.error("Program ID (client):", l1Program.programId.toBase58());
-                console.error("Data length:", authStateAccountInfo.data.length);
-                console.error("Data (hex, first 128 chars):", Buffer.from(authStateAccountInfo.data).toString('hex').slice(0, 128));
-                
-                setActionFeedbackMessage(
-                    "❌ Internal error reading Quick Bets state. " +
-                    "Please refresh the page, and if it still fails, try 'Initialize Profile' again."
-                );
-                setLoading(false);
-                return;
+            let currentNonceForSigning = new BN(0);
+            if (authStateData && authStateAccountInfo && authStateAccountInfo.owner.equals(l1Program.programId)) {
+                // If we successfully decoded our data above and it's not delegated yet
+                const nonceValue = (authStateData as any).nonce;
+                currentNonceForSigning = nonceValue ? new BN(nonceValue.toString()) : new BN(0);
             }
-            const currentNonceForSigning = decodedAuthState.nonce ? new BN(decodedAuthState.nonce.toString()) : new BN(0);
 
             const delegationMessageString = `BSBET_DELEGATE_AUTH:${userAuthority.toBase58()}:${currentNonceForSigning.toString()}`;
 
@@ -539,7 +465,6 @@ export default function BetForm() {
 
             await l1Program.methods.manageDelegation(1, messageBuffer, signatureForProgram as any)
                 .accounts({
-                    payer: userAuthority,
                     userAuthState: userAuthStatePda,
                     userAuthority: userAuthority,
                     systemProgram: SystemProgram.programId,
@@ -547,18 +472,24 @@ export default function BetForm() {
                     ixSysvar: anchor.web3.SYSVAR_INSTRUCTIONS_PUBKEY,
                 } as any).rpc({ commitment: "confirmed" });
 
+            const postManageInfo = await l1Program.provider.connection.getAccountInfo(userAuthStatePda);
+            console.log("post-manageDelegation owner:", postManageInfo?.owner?.toBase58() ?? "<null>");
+            if (postManageInfo?.data) {
+                try {
+                    const decoded = l1Program.coder.accounts.decode<any>("userAuthState", postManageInfo.data);
+                    console.log("post-manageDelegation decoded:", decoded);
+                } catch (e) {
+                    console.warn("post-manageDelegation decode failed:", e);
+                }
+            }
+
             setActionFeedbackMessage("Confirming Delegation with MagicBlock (Step 2)...");
             const delegateTx = await l1Program.methods.delegateAuthState()
-                .accounts({ payer: userAuthority, userAuthority: userAuthority, pda: userAuthStatePda } as any)
+                .accounts({ payer: userAuthority, pda: userAuthStatePda } as any)
                 .rpc({ commitment: "confirmed" });
 
-            await l1Program.methods.delegateUserProfile()
-                .accounts({ payer: userAuthority, userAuthority: userAuthority, pda: userProfilePda } as any)
-                .rpc({ commitment: "confirmed" });
-
-            await l1Program.methods.delegateActiveBet()
-                .accounts({ payer: userAuthority, userAuthority: userAuthority, pda: activeBetPda } as any)
-                .rpc({ commitment: "confirmed" });
+            const postDelegateInfo2 = await l1Program.provider.connection.getAccountInfo(userAuthStatePda);
+            console.log("post-delegateAuthState owner:", postDelegateInfo2?.owner?.toBase58() ?? "<null>");
 
             setActionFeedbackMessage(`Successfully Enabled Quick Bets! Tx: ${delegateTx}`);
             // After delegateAuthState, owner has changed.
@@ -574,59 +505,37 @@ export default function BetForm() {
 
         } catch (error: any) {
             console.error("Error Enabling Quick Bets:", error);
+            if (error?.logs) console.error("Anchor logs:", error.logs);
             let errorMsg = "Failed to enable Quick Bets: ";
             if (error instanceof anchor.AnchorError) {
                 errorMsg += `(${error.error.errorCode.number}) ${error.error.errorMessage}`;
             } else { errorMsg += error.message || String(error); }
             setActionFeedbackMessage(errorMsg);
         } finally {
+            console.groupEnd();
             setLoading(false);
         }
     };
 
     const handleUndelegate = async () => {
-        if (!l1Program || !userAuthority || !userAuthStatePda) {
-            setActionFeedbackMessage("Wallet/Program not ready for disabling Quick Bets.");
-            setLoading(false);
-            return;
+        if (!l1Program || !userAuthority || !userAuthStatePda || !userWallet?.signTransaction) {
+            setActionFeedbackMessage("Wallet/Program not ready for disabling Quick Bets."); setLoading(false); return;
         }
 
-        setLoading(true);
-
+        setLoading(true); setActionFeedbackMessage("Disabling Quick Bets (Step 1: Telling MagicBlock)...");
         try {
-            console.log("\n=== DISABLE QUICK BETS DEBUG ===");
-            console.log("User Authority (wallet):", userAuthority.toBase58());
-            console.log("UserAuthState PDA:", userAuthStatePda.toBase58());
-            console.log("UserProfile PDA:", userProfilePda?.toBase58());
-                        console.log("ActiveBet PDA:", activeBetPda?.toBase58());
-                        console.log("ActiveBet PDA:", activeBetPda?.toBase58());
-            console.log("isDelegated (React state):", isDelegated);
-            
-            // 1) Lấy thông tin UserAuthState để biết owner hiện tại
-            const authInfo = await l1Program.provider.connection.getAccountInfo(userAuthStatePda);
-            if (!authInfo) {
-                setActionFeedbackMessage("UserAuthState not found. Nothing to undelegate.");
-                setLoading(false);
-                return;
-            }
+            console.group("[bs_bet] Disable Quick Bets (undelegate)");
+            console.log("programId:", l1Program.programId.toBase58());
+            console.log("userAuthority:", userAuthority.toBase58());
+            console.log("userAuthStatePda:", userAuthStatePda.toBase58());
+            const preInfo = await l1Program.provider.connection.getAccountInfo(userAuthStatePda, "confirmed");
+            console.log("pre-undelegate L1 owner:", preInfo?.owner?.toBase58() ?? "<null>");
 
-            const owner = authInfo.owner.toBase58();
-            const ourProgramId = l1Program.programId.toBase58();
-            const magicProgramId = MAGICBLOCK_DELEGATION_PROGRAM_ID.toBase58();
-
-            console.log("🔍 [handleUndelegate] UserAuthState owner:", owner);
-            console.log("Our program ID:", ourProgramId);
-            console.log("MagicBlock program ID:", magicProgramId);
-            console.log("Owner == MagicBlock?", owner === magicProgramId);
-            console.log("Owner == Our program?", owner === ourProgramId);
-
-            // CASE 1: Owner vẫn là program của bạn → chỉ cần flip is_delegated = false
-            if (owner === ourProgramId) {
-                setActionFeedbackMessage("Disabling Quick Bets (updating on-chain flag)...");
-                const undelegateTx = await l1Program.methods
-                    .manageDelegation(0, Buffer.from([]), new Array(64).fill(0) as any)
+            // If ownership is already back on L1, we can directly finalize state.
+            if (preInfo?.owner && preInfo.owner.equals(l1Program.programId)) {
+                setActionFeedbackMessage("Ownership already on L1. Finalizing state (Step 2)...");
+                const undelegateTx = await l1Program.methods.manageDelegation(0, Buffer.from([]), new Array(64).fill(0) as any)
                     .accounts({
-                        payer: userAuthority,
                         userAuthState: userAuthStatePda,
                         userAuthority: userAuthority,
                         systemProgram: SystemProgram.programId,
@@ -638,54 +547,134 @@ export default function BetForm() {
 
                 setActionFeedbackMessage(`Successfully Disabled Quick Bets! Tx: ${undelegateTx}`);
                 await fetchUserAuthStateData();
-                setLoading(false);
                 return;
             }
 
-            // CASE 2: Owner là MagicBlock program → cần config thêm để undelegate
-            if (owner === magicProgramId) {
-                console.warn("[handleUndelegate] UserAuthState is fully delegated to MagicBlock.");
-                console.warn("To undelegate, we need the correct MagicBlock context account.");
-                console.warn("This requires additional MagicBlock SDK setup (see MagicBlock docs).");
-                
+            // MagicBlock template pattern: build TX, sign once, sendRawTransaction via MagicBlock RPC
+            const magicblockConnection = new SolanaConnection(MAGICBLOCK_RPC_ENDPOINT, "confirmed");
+
+            const tx = await l1Program.methods
+                .undelegateFromMagicblock()
+                .accounts({
+                    userAuthority: userAuthority,
+                    userAuthStateToUndelegate: userAuthStatePda,
+                } as any)
+                .transaction();
+
+            const {
+                context: { slot: minContextSlot },
+                value: { blockhash, lastValidBlockHeight },
+            } = await magicblockConnection.getLatestBlockhashAndContext();
+
+            tx.feePayer = userAuthority;
+            tx.recentBlockhash = blockhash;
+
+            const signed = await userWallet.signTransaction(tx);
+            const sig1 = await magicblockConnection.sendRawTransaction(signed.serialize(), {
+                skipPreflight: true,
+                minContextSlot,
+            });
+
+            await magicblockConnection.confirmTransaction(
+                { signature: sig1, blockhash, lastValidBlockHeight },
+                "confirmed"
+            );
+
+            console.log("undelegate tx sig:", sig1);
+            try {
+                const txDetails = await magicblockConnection.getTransaction(sig1, {
+                    commitment: "confirmed",
+                    maxSupportedTransactionVersion: 0,
+                } as any);
+                const logs = txDetails?.meta?.logMessages;
+                if (logs?.length) console.log("MagicBlock tx logMessages:", logs);
+            } catch (e) {
+                console.warn("Unable to fetch MagicBlock tx logs:", e);
+            }
+
+            setActionFeedbackMessage(`MagicBlock undelegation initiated (Step 1 complete). Tx: ${sig1}. Waiting for L1 ownership...`);
+
+            // IMPORTANT: the PDA may stay owned by MagicBlock briefly even after the tx is confirmed.
+            // If we call manageDelegation(0) too early, Anchor will fail with AccountOwnedByWrongProgram.
+            const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+            // MagicBlock undelegation is scheduled; ownership return can take a bit.
+            // Instead of failing and requiring a 2nd click, just wait longer and show progress.
+            let ownerReturned = false;
+            const maxAttempts = 90; // ~45s
+            for (let attempt = 0; attempt < maxAttempts; attempt++) {
+                const info = await l1Program.provider.connection.getAccountInfo(userAuthStatePda, "confirmed");
+                const owner = info?.owner;
+                console.log(`poll[${attempt}] L1 owner:`, owner?.toBase58() ?? "<null>");
+                if (owner && owner.equals(l1Program.programId)) {
+                    ownerReturned = true;
+                    break;
+                }
+                if (attempt === 10 || attempt === 30 || attempt === 60) {
+                    setActionFeedbackMessage(
+                        `Undelegation scheduled. Waiting for ownership to return... (${attempt}/${maxAttempts})`
+                    );
+                }
+                await sleep(500);
+            }
+            if (!ownerReturned) {
                 setActionFeedbackMessage(
-                    "⚠️ Quick Bets fully enabled via MagicBlock. " +
-                    "Disabling requires additional MagicBlock configuration (context account). " +
-                    "For now, you can continue using Quick Bets or create a new profile to use standard mode."
+                    "Undelegation is still pending on MagicBlock. Please wait ~30-60s and try again if it doesn't complete."
                 );
-                setLoading(false);
                 return;
             }
 
-            // CASE 3: Owner lạ
-            setActionFeedbackMessage(`Unexpected owner for UserAuthState: ${owner}. Cannot safely undelegate.`);
+            setActionFeedbackMessage("Ownership returned. Finalizing state (Step 2)...");
+
+            // Step 2: Now that ownership is (hopefully) back with our program,
+            // call manageDelegation(0) to update our UserAuthState.is_delegated flag.
+            const undelegateTx = await l1Program.methods.manageDelegation(0, Buffer.from([]), new Array(64).fill(0) as any)
+                .accounts({
+                    userAuthState: userAuthStatePda,
+                    userAuthority: userAuthority,
+                    systemProgram: SystemProgram.programId,
+                    ixSysvar: anchor.web3.SYSVAR_INSTRUCTIONS_PUBKEY,
+                    magicProgram: null,
+                    magicContext: null,
+                } as any)
+                .rpc({ commitment: "confirmed" });
+
+            const postInfo = await l1Program.provider.connection.getAccountInfo(userAuthStatePda, "confirmed");
+            console.log("post-manageDelegation(0) owner:", postInfo?.owner?.toBase58() ?? "<null>");
+            if (postInfo?.data) {
+                try {
+                    const decoded = l1Program.coder.accounts.decode<any>("userAuthState", postInfo.data);
+                    console.log("post-manageDelegation(0) decoded:", decoded);
+                } catch (e) {
+                    console.warn("post-manageDelegation(0) decode failed:", e);
+                }
+            }
+
+            setActionFeedbackMessage(`Successfully Disabled Quick Bets! Tx: ${undelegateTx}`);
+            await fetchUserAuthStateData(); // This should now fetch Account<UserAuthState> with is_delegated = false
+
         } catch (error: any) {
             console.error("Error Disabling Quick Bets:", error);
+            if (error?.logs) console.error("Anchor logs:", error.logs);
             let errorMsg = "Failed to disable Quick Bets: ";
-            if (error instanceof anchor.AnchorError) {
-                errorMsg += `(${error.error.errorCode.number}) ${error.error.errorMessage}`;
-            } else {
-                errorMsg += error.message || String(error);
-            }
+            // ... (your existing error parsing) ...
+            if (error instanceof anchor.AnchorError) { errorMsg += `(${error.error.errorCode.number}) ${error.error.errorMessage}`; }
+            else { errorMsg += error.message || String(error); }
             setActionFeedbackMessage(errorMsg);
-            await fetchUserAuthStateData();
+            await fetchUserAuthStateData(); // Fetch to see what state it's in
         } finally {
+            console.groupEnd();
             setLoading(false);
         }
     };
 
     // --- MODIFIED: Handle Bet Placement ---
     const handleBet = async (direction: "UP" | "DOWN") => { // Parameter is 'direction'
-        // Spec: QuickBet OFF => normal bet, QuickBet ON => ephemeral bet
-        const useQuickBets = !!isDelegated;
+        // Determine which program client and provider to use
+        const currentProgram = isDelegated && ephemeralProgram ? ephemeralProgram : l1Program;
+        const currentProvider = isDelegated && ephemeralProviderRef.current ? ephemeralProviderRef.current : l1Provider;
 
-        if (!l1Program || !userAuthority || !userProfilePda || !userAuthStatePda || !activeBetPda || !l1Provider) {
-            setActionFeedbackMessage('Wallet/Program not ready for bet.');
-            return;
-        }
-        if (useQuickBets && (!ephemeralProgram || !ephemeralProviderRef.current)) {
-            setActionFeedbackMessage('Quick Bets enabled but MagicBlock provider/program not ready.');
-            return;
+        if (!currentProgram || !userAuthority || !userProfilePda || !userAuthStatePda || !currentProvider) {
+            setActionFeedbackMessage('Wallet/Program not ready for bet.'); return;
         }
         if (isProfileInitialized && userPoints < fixedBetAmount) {
             setActionFeedbackMessage('Insufficient points.'); return;
@@ -697,99 +686,77 @@ export default function BetForm() {
         const assetNameArg: string = "SOL/USD";
         const amountArg = new BN(fixedBetAmount);
         const durationSecondsArg = new BN(1 * 60); // 1 minute for testing
+        const betAccountKeypair = Keypair.generate();
 
         try {
-            console.log("\n=== PLACE BET DEBUG ===");
-            console.log(`Direction: ${direction} (${directionArg})`);
-            console.log(`Amount: ${fixedBetAmount} points`);
-            console.log(`Duration: 1 minute`);
-            console.log("User Authority (wallet):", userAuthority.toBase58());
-            console.log("UserProfile PDA:", userProfilePda.toBase58());
-            console.log("UserAuthState PDA:", userAuthStatePda.toBase58());
-            console.log("ActiveBet PDA:", activeBetPda.toBase58());
-            console.log("isDelegated (React state):", isDelegated);
-            console.log("useQuickBets?", useQuickBets);
-
-            let txSignature: string;
-
-            if (!useQuickBets) {
-                txSignature = await l1Program.methods
-                    .openBetNormal(assetNameArg, directionArg, amountArg, durationSecondsArg)
-                    .accounts({
-                        userSigner: userAuthority,
-                        userAuthState: userAuthStatePda,
-                        userProfile: userProfilePda,
-                        activeBet: activeBetPda,
-                        pythPriceFeed: PYTH_SOL_USD_PRICE_ACCOUNT,
-                        systemProgram: SystemProgram.programId,
-                    } as any)
-                    .rpc({ commitment: "confirmed" });
+            console.group(`[bs_bet] openBet (${direction})`);
+            console.log(`mode: ${isDelegated && ephemeralProgram ? "MagicBlock (ephemeral RPC)" : "L1"}`);
+            console.log("userAuthority:", userAuthority.toBase58());
+            console.log("userProfilePda:", userProfilePda.toBase58());
+            console.log("userAuthStatePda:", userAuthStatePda.toBase58());
+            // Owner check should use the L1 connection (ground truth). Guard in case l1Program is not available.
+            if (l1Program) {
+                const info = await l1Program.provider.connection.getAccountInfo(userAuthStatePda, "confirmed");
+                console.log("UserAuthState owner (L1 view):", info?.owner?.toBase58() ?? "<null>");
             } else {
-                const authInfo = await l1Program.provider.connection.getAccountInfo(userAuthStatePda);
-                const profileInfo = await l1Program.provider.connection.getAccountInfo(userProfilePda);
-                const betInfo = await l1Program.provider.connection.getAccountInfo(activeBetPda);
-
-                if (
-                    !authInfo || !profileInfo || !betInfo ||
-                    !authInfo.owner.equals(MAGICBLOCK_DELEGATION_PROGRAM_ID) ||
-                    !profileInfo.owner.equals(MAGICBLOCK_DELEGATION_PROGRAM_ID) ||
-                    !betInfo.owner.equals(MAGICBLOCK_DELEGATION_PROGRAM_ID)
-                ) {
-                    setActionFeedbackMessage(
-                        "Quick Bets is ON, but not all PDAs are delegated. Click 'Enable Quick Bets' again to delegate auth/profile/active_bet."
-                    );
-                    return;
-                }
-
-                txSignature = await ephemeralProgram!.methods
-                    .openBetEphemeral(assetNameArg, directionArg, amountArg, durationSecondsArg, userAuthority)
-                    .accounts({
-                        payer: userAuthority,
-                        userAuthState: userAuthStatePda,
-                        userProfile: userProfilePda,
-                        activeBet: activeBetPda,
-                        pythPriceFeed: PYTH_SOL_USD_PRICE_ACCOUNT,
-                        magicProgram: MAGICBLOCK_MAGIC_PROGRAM_ID,
-                        magicContext: MAGICBLOCK_MAGIC_CONTEXT,
-                    } as any)
-                    .rpc({ commitment: "confirmed" });
+                console.log("UserAuthState owner (L1 view): <skipped - l1Program not ready>");
             }
 
+            const methodsBuilder = currentProgram.methods
+                .openBet( // Call to the Rust program's open_bet instruction
+                    assetNameArg,
+                    directionArg, // --- THIS IS THE CORRECTED VARIABLE ---
+                    amountArg,
+                    durationSecondsArg,
+                    userAuthority // user_authority_for_pdas
+                )
+                .accounts({
+                    betAccount: betAccountKeypair.publicKey,
+                    userSigner: userAuthority,
+                    userAuthState: userAuthStatePda,
+                    userProfile: userProfilePda,
+                    pythPriceFeed: PYTH_SOL_USD_PRICE_ACCOUNT,
+                    systemProgram: SystemProgram.programId,
+                } as any)
+                .signers([betAccountKeypair]);
+
+            let txSignature: string;
+            if (isDelegated && ephemeralProviderRef.current && currentProgram === ephemeralProgram) {
+                console.log("Sending TX via Ephemeral Provider's RPC method");
+                txSignature = await methodsBuilder.rpc({ commitment: "confirmed" });
+            } else {
+                console.log("Sending TX via L1 Provider's RPC method");
+                txSignature = await methodsBuilder.rpc({ commitment: "confirmed" });
+            }
+
+            console.log("openBet tx:", txSignature);
+
             setFeedback(`Bet ${direction} Placed!`);
-            setActionFeedbackMessage(`Tx: ${txSignature} via ${useQuickBets ? "MB" : "L1"}`);
-            await fetchUserProfileData();
-            await fetchAndDisplayActiveBets();
+            setActionFeedbackMessage(`Tx: ${txSignature} via ${isDelegated && ephemeralProgram ? "MB" : "L1"}`);
+            // ... (localStorage, fetchUserProfileData, fetchAndDisplayActiveBets using l1Program) ...
+            const currentBets = JSON.parse(localStorage.getItem(`activeBets_${userAuthority.toBase58()}`) || '[]');
+            localStorage.setItem(`activeBets_${userAuthority.toBase58()}`, JSON.stringify([...currentBets, betAccountKeypair.publicKey.toBase58()]));
+            await fetchUserProfileData(); // Assuming this uses l1Program to get ground truth
+            await fetchAndDisplayActiveBets(); // Assuming this uses l1Program
 
 
         } catch (error: any) {
-            const msg = error?.message || String(error);
-            const rejected =
-                msg.includes("User rejected") ||
-                msg.includes("rejected the request") ||
-                msg.includes("Transaction cancelled") ||
-                error?.name === "WalletSignTransactionError";
-
-            if (rejected) {
-                console.warn("Bet cancelled by user.");
-                setFeedback(null);
-                setActionFeedbackMessage("Transaction cancelled.");
-                return;
-            }
-
             console.error("Error opening bet:", error);
+            if (error?.logs) console.error("Anchor logs:", error.logs);
             let errorMsg = "Failed to place bet.";
             if (error instanceof anchor.AnchorError) {
                 errorMsg = `Bet Error (${error.error.errorCode.number}): ${error.error.errorMessage}`;
                 if (error.error.errorCode.number === 6015) {
                     errorMsg += " Try enabling Quick Bets or ensure profile is active.";
                 }
-            } else if (msg) {
-                errorMsg += ` ${msg}`;
-            }
+            } else if (error.message) { errorMsg += ` ${error.message}`; }
             setFeedback(null); setActionFeedbackMessage(errorMsg);
             await fetchUserProfileData(); // Refresh points
         }
-        finally { setLoading(false); }
+        finally {
+            console.groupEnd();
+            setLoading(false);
+        }
     };
 
     return (
@@ -798,15 +765,28 @@ export default function BetForm() {
                 <UserProfile userPoints={userPoints} fixedBetAmount={fixedBetAmount} isProfileInitialized={isProfileInitialized} />
             </div>
 
+            {/* Debug: Check UserAuthState */}
+            {userWallet && userAuthority && userAuthStatePda && (
+                <div className="my-2 w-full">
+                    <button
+                        className="w-full px-2 py-1 bg-gray-700 text-white rounded text-xs hover:bg-gray-600"
+                        onClick={checkUserAuthState}
+                        disabled={loading}
+                    >
+                        🔍 Debug: Check UserAuthState (Console)
+                    </button>
+                </div>
+            )}
+
             {/* --- MODIFIED: Separate Buttons for Enable/Disable Delegation --- */}
             {userWallet && userAuthority && authStateData !== undefined && ( // Show if auth state is loaded or explicitly null after fetch
                 <div className="my-3 w-full">
                     {!isDelegated ? (
                         // Show "Enable Quick Bets" button if not currently delegated
                         <button
-                            className="w-full px-4 py-2.5 bg-indigo-600 text-white rounded-lg font-semibold hover:bg-indigo-500 transition-colors text-sm disabled:bg-gray-600 disabled:cursor-not-allowed"
+                            className="w-full px-4 py-2.5 bg-indigo-600 text-white rounded-lg font-semibold hover:bg-indigo-500 transition-colors text-sm"
                             onClick={handleDelegate}
-                            disabled={loading || !userWallet?.signMessage || !l1Program || !connected || !isProfileInitialized}
+                            disabled={loading || !userWallet?.signMessage || !l1Program || !connected}
                         >
                             {loading && actionFeedbackMessage.includes("Enabling") ? "Enabling Quick Bets..." : "Enable Quick Bets"}
                         </button>
@@ -821,11 +801,7 @@ export default function BetForm() {
                         </button>
                     )}
                     <p className="text-xs text-gray-400 mt-1 text-center">
-                        {!isProfileInitialized 
-                            ? "Initialize profile first to enable Quick Bets" 
-                            : isDelegated 
-                                ? "Quick Bets: ON (MagicBlock Active)" 
-                                : "Quick Bets: OFF (Standard Transactions)"}
+                        {isDelegated ? "Quick Bets: ON (MagicBlock Active)" : "Quick Bets: OFF (Standard Transactions)"}
                     </p>
                 </div>
             )}
@@ -879,6 +855,52 @@ export default function BetForm() {
                     >
                         {loading && actionFeedbackMessage.includes("profile") ? "Initializing..." : "Initialize Profile (1000 pts)"}
                     </button>
+                </div>
+            )}
+
+            {/* Active Bets Display */}
+            {displayableBets.length > 0 && (
+                <div className="mt-4 w-full">
+                    <h3 className="text-sm font-semibold text-gray-300 mb-2">Active Bets</h3>
+                    <div className="space-y-2">
+                        {displayableBets.map((bet, idx) => {
+                            const isActive = bet.status === 0;
+                            const isWon = bet.status === 1;
+                            const isLost = bet.status === 2;
+                            const directionText = bet.direction === 1 ? "UP ⬆️" : "DOWN ⬇️";
+                            const statusText = isActive ? "Active" : isWon ? "Won ✅" : "Lost ❌";
+                            const statusColor = isActive ? "text-yellow-400" : isWon ? "text-green-400" : "text-red-400";
+
+                            return (
+                                <div key={idx} className="bg-gray-800 p-3 rounded-lg text-xs">
+                                    <div className="flex justify-between mb-1">
+                                        <span className="text-gray-400">Direction:</span>
+                                        <span className="font-semibold">{directionText}</span>
+                                    </div>
+                                    <div className="flex justify-between mb-1">
+                                        <span className="text-gray-400">Amount:</span>
+                                        <span>{bet.amountStaked} pts</span>
+                                    </div>
+                                    <div className="flex justify-between mb-1">
+                                        <span className="text-gray-400">Status:</span>
+                                        <span className={statusColor}>{statusText}</span>
+                                    </div>
+                                    {bet.initialPrice > 0 && (
+                                        <div className="flex justify-between mb-1">
+                                            <span className="text-gray-400">Entry:</span>
+                                            <span>${(bet.initialPrice / 1_000_000).toFixed(2)}</span>
+                                        </div>
+                                    )}
+                                    {!isActive && bet.resolvedPrice > 0 && (
+                                        <div className="flex justify-between">
+                                            <span className="text-gray-400">Exit:</span>
+                                            <span>${(bet.resolvedPrice / 1_000_000).toFixed(2)}</span>
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })}
+                    </div>
                 </div>
             )}
 

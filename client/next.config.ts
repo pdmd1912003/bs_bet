@@ -1,13 +1,16 @@
-import { createCivicAuthPlugin } from "@civic/auth-web3/nextjs"
+// client/next.config. ts
+
+// ❌ DELETE Civic import:
+// import { createCivicAuthPlugin } from "@civic/auth-web3/nextjs"
+
 import type { NextConfig } from "next";
 
-/** @type {import('next').NextConfig} */
-const nextConfig = {
+const nextConfig: NextConfig = {
   typescript: {
-    ignoreBuildErrors: true, // Ignore TypeScript errors during build
+    ignoreBuildErrors: true,
   },
   eslint: {
-    ignoreDuringBuilds: true, // Ignore ESLint errors during build
+    ignoreDuringBuilds: true,
   },
   compiler: {
     styledComponents: true,
@@ -17,11 +20,10 @@ const nextConfig = {
   },
 };
 
-// Get Civic client ID from environment variables
-const civicClientId = process.env.NEXT_PUBLIC_CIVIC_CLIENT_ID || "33614fbc-b837-4f44-a076-0eb2a669c7fa";
+// ❌ DELETE these lines:
+// const civicClientId = process.env.NEXT_PUBLIC_CIVIC_CLIENT_ID || "... ";
+// const withCivicAuth = createCivicAuthPlugin({ clientId: civicClientId });
+// export default withCivicAuth(nextConfig)
 
-const withCivicAuth = createCivicAuthPlugin({
-  clientId: civicClientId
-});
-
-export default withCivicAuth(nextConfig)
+// ✅ REPLACE with:
+export default nextConfig;

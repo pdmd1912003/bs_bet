@@ -11,31 +11,38 @@ import BetForm from "../components/BetForm";
 import '../styles/globals.css';
 
 function Layout({ children }: { children: React.ReactNode }) {
-  const endpoint = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || "https://api.devnet.solana.com";
+  // RPC endpoint from env
+  const endpoint = process.env.NEXT_PUBLIC_SOLANA_RPC_URL 
+    || "https://api.devnet.solana.com";
+  
+  // Define supported wallets
   const wallets = useMemo(
     () => [
-      new PhantomWalletAdapter(),
-      new SolflareWalletAdapter(),
+      new PhantomWalletAdapter(),   // ← Phantom wallet
+      new SolflareWalletAdapter(),  // ← Solflare wallet
     ],
     []
   );
 
   return (
     <html lang="en">
-      <head>
-        {/* Removed synchronous script */}
-      </head>
       <body className="bg-gray-800 min-h-screen text-gray-100">
+        {/* Step 1: Provide Solana connection */}
         <ConnectionProvider endpoint={endpoint}>
-          <WalletProvider wallets={wallets} autoConnect>
+          {/* Step 2: Provide wallet context */}
+          <WalletProvider 
+            wallets={wallets} 
+            autoConnect  // ← Auto-connect on page load
+          >
+            {/* Step 3: Provide wallet modal UI */}
             <WalletModalProvider>
               <div className="container mx-auto px-4 py-8 max-w-5xl">
-                <Navbar />
-                <div className="flex flex-col md:flex-row gap-8 justify-end items-stretch mt-8">
+                <Navbar />  {/* ← Navbar has WalletMultiButton */}
+                <div className="flex flex-col md:flex-row gap-8">
                   <PriceTracker />
                   <BetForm />
                 </div>
-                <main className="mt-8 bg-gray-800 rounded-lg shadow-lg p-6 border border-gray-700">
+                <main className="mt-8">
                   {children}
                 </main>
               </div>

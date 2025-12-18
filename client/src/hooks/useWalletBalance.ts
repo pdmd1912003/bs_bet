@@ -1,5 +1,7 @@
+// client/src/hooks/useWalletBalance.ts
+
 import { useState, useEffect } from 'react';
-import { Connection, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
+import { Connection, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { useSolanaWallet } from './useSolanaWallet';
 
 export function useWalletBalance() {
@@ -9,15 +11,18 @@ export function useWalletBalance() {
 
     useEffect(() => {
         const fetchBalance = async () => {
-            if (!publicKey) {
+            if (! publicKey) {
                 setBalance(null);
                 return;
             }
 
             setIsLoading(true);
             try {
-                const rpcUrl = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || "https://api.devnet.solana.com";
+                const rpcUrl = process.env.NEXT_PUBLIC_SOLANA_RPC_URL 
+                    || "https://api.devnet.solana.com";
                 const connection = new Connection(rpcUrl, "confirmed");
+                
+                // Fetch SOL balance
                 const lamports = await connection.getBalance(publicKey);
                 setBalance(lamports / LAMPORTS_PER_SOL);
             } catch (error) {
@@ -30,11 +35,11 @@ export function useWalletBalance() {
 
         fetchBalance();
 
-        // Set up polling every 30 seconds
+        // Poll every 30 seconds
         const intervalId = setInterval(fetchBalance, 30000);
 
         return () => clearInterval(intervalId);
-    }, [publicKey]);
+    }, [publicKey]); // Re-fetch when wallet changes
 
     return { balance, isLoading };
-} 
+}
