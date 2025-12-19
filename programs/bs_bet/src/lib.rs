@@ -13,9 +13,9 @@ use pyth_solana_receiver_sdk::price_update::{get_feed_id_from_hex, PriceUpdateV2
 // MagicBlock SDK integration
 use ephemeral_rollups_sdk::anchor::{commit, delegate, ephemeral};
 use ephemeral_rollups_sdk::cpi::DelegateConfig;
-use ephemeral_rollups_sdk::ephem::commit_and_undelegate_accounts;
+use ephemeral_rollups_sdk::ephem::{commit_accounts, commit_and_undelegate_accounts};
 
-declare_id!("Atmqs3pWyhsPd9pztHvDZ1duNPACt2tbwLRpAgTxjXtt"); // YOUR PROGRAM ID
+declare_id!("7XZh45UqwLRjZoVc88ZLZyXEi1czTiMLMjtXGfUKQi1f"); // YOUR PROGRAM ID
 
 pub const SOL_USD_FEED_ID_HEX: &str = "0xef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d";
 pub const MAXIMUM_PRICE_AGE_SECONDS: u64 = 3600 * 2; // 2 hours
@@ -23,6 +23,7 @@ const STRING_LENGTH_PREFIX: usize = 4; // For String serialization
 const MAX_ASSET_NAME_LENGTH: usize = 20; // Max length for asset_name string in ActiveBet
 const DISCRIMINATOR_LENGTH: usize = 8; // Anchor's account discriminator
 const INITIAL_USER_POINTS: u64 = 1000;
+pub const ACTIVE_BET_SEED: &[u8] = b"active_bet";
 
 // --- Account Struct Definitions ---
 #[account]
@@ -85,6 +86,23 @@ pub mod bs_bet {
             auth_state.bump = ctx.bumps.user_auth_state_for_profile_creation;
         }
         msg!("User profile created/updated. Auth state (is_delegated={}) initialized if new.", auth_state.is_delegated);
+        Ok(())
+    }
+
+    /// Create (or ensure) the per-user ActiveBet PDA exists on L1.
+    /// This must be called before using `open_bet_er`, because ER cannot create new accounts.
+    pub fn init_active_bet(ctx: Context<InitActiveBet>) -> Result<()> {
+        let bet_account = &mut ctx.accounts.active_bet;
+        if bet_account.user == Pubkey::default() {
+            bet_account.user = ctx.accounts.user_authority.key();
+            bet_account.asset_name = "".to_string();
+            bet_account.initial_price = 0;
+            bet_account.expiry_timestamp = 0;
+            bet_account.direction = 0;
+            bet_account.amount_staked = 0;
+            bet_account.resolved_price = 0;
+            bet_account.status = 0;
+        }
         Ok(())
     }
 
@@ -179,6 +197,48 @@ pub mod bs_bet {
         Ok(())
     }
 
+    pub fn delegate_user_profile(ctx: Context<DelegateUserProfile>) -> Result<()> {
+        msg!(
+            "Attempting to delegate UserProfile PDA: {} with payer: {}",
+            ctx.accounts.pda.key(),
+            ctx.accounts.payer.key()
+        );
+
+        ctx.accounts.delegate_pda(
+            &ctx.accounts.payer,
+            &[b"profile".as_ref(), ctx.accounts.payer.key().as_ref()],
+            DelegateConfig::default(),
+        )?;
+
+        msg!(
+            "UserProfile PDA ({}) successfully delegated via MagicBlock SDK by payer: {}",
+            ctx.accounts.pda.key(),
+            ctx.accounts.payer.key()
+        );
+        Ok(())
+    }
+
+    pub fn delegate_active_bet(ctx: Context<DelegateActiveBet>) -> Result<()> {
+        msg!(
+            "Attempting to delegate ActiveBet PDA: {} with payer: {}",
+            ctx.accounts.pda.key(),
+            ctx.accounts.payer.key()
+        );
+
+        ctx.accounts.delegate_pda(
+            &ctx.accounts.payer,
+            &[ACTIVE_BET_SEED, ctx.accounts.payer.key().as_ref()],
+            DelegateConfig::default(),
+        )?;
+
+        msg!(
+            "ActiveBet PDA ({}) successfully delegated via MagicBlock SDK by payer: {}",
+            ctx.accounts.pda.key(),
+            ctx.accounts.payer.key()
+        );
+        Ok(())
+    }
+
     pub fn open_bet(
         ctx: Context<OpenBetAccounts>,
         asset_name_arg: String,
@@ -187,6 +247,12 @@ pub mod bs_bet {
         duration_seconds_arg: i64,
         user_authority_for_pdas: Pubkey ) -> Result<()> {
         let auth_state = &mut ctx.accounts.user_auth_state;
+
+        // Standard bet must NOT be used when Quick Bets are enabled.
+        // If user is delegated to MagicBlock, use `open_bet_er` instead.
+        if auth_state.is_delegated {
+            return Err(error!(BetError::UseErForQuickBets));
+        }
 
         // Initialize UserAuthState if it's new
         if auth_state.user_authority == Pubkey::default() {
@@ -257,6 +323,140 @@ pub mod bs_bet {
         bet_account.status = 0; // Active
 
         msg!("Bet opened. UserAuthState.is_delegated: {}", auth_state.is_delegated);
+        Ok(())
+    }
+
+    /// Quick Bets (ER) path.
+    /// This instruction is intended to be sent via MagicBlock RPC, after the user's PDAs are delegated.
+    pub fn open_bet_er(
+        ctx: Context<OpenBetErAccounts>,
+        asset_name_arg: String,
+        direction_arg: u8,
+        amount_arg: u64,
+        duration_seconds_arg: i64,
+        user_authority_for_pdas: Pubkey,
+    ) -> Result<()> {
+        let auth_state = &ctx.accounts.user_auth_state;
+        if auth_state.user_authority != user_authority_for_pdas {
+            return Err(error!(BetError::UserProfileAuthorityMismatch));
+        }
+        if !auth_state.is_delegated {
+            return Err(error!(BetError::NotDelegated));
+        }
+
+        let user_profile = &mut ctx.accounts.user_profile;
+        if user_profile.authority != user_authority_for_pdas {
+            return Err(error!(BetError::UserProfileAuthorityMismatch));
+        }
+
+        // --- same bet logic as open_bet ---
+        let bet_account = &mut ctx.accounts.bet_account;
+        let clock = Clock::get()?;
+        let price_update_account = &ctx.accounts.pyth_price_feed;
+
+        if asset_name_arg != "SOL/USD" {
+            return Err(error!(BetError::UnsupportedAsset));
+        }
+        if direction_arg != 0 && direction_arg != 1 {
+            return Err(error!(BetError::InvalidDirection));
+        }
+        if amount_arg == 0 {
+            return Err(error!(BetError::ZeroAmount));
+        }
+        if duration_seconds_arg <= 0 {
+            return Err(error!(BetError::InvalidDuration));
+        }
+        if user_profile.points < amount_arg {
+            return Err(error!(BetError::InsufficientPoints));
+        }
+
+        user_profile.points = user_profile
+            .points
+            .checked_sub(amount_arg)
+            .ok_or_else(|| error!(BetError::InsufficientPoints))?;
+        msg!(
+            "[ER] User {} points after bet: {}",
+            user_authority_for_pdas,
+            user_profile.points
+        );
+
+        let target_feed_id =
+            get_feed_id_from_hex(SOL_USD_FEED_ID_HEX).map_err(|_| BetError::InvalidPythFeedIdFormat)?;
+        let current_pyth_price_struct = price_update_account
+            .get_price_no_older_than(&clock, MAXIMUM_PRICE_AGE_SECONDS, &target_feed_id)
+            .map_err(|e| {
+                msg!("Pyth err in open_bet_er: {:?}", e);
+                BetError::PythPriceFeedError
+            })?;
+        let pyth_price_value = current_pyth_price_struct.price;
+        let pyth_exponent = current_pyth_price_struct.exponent;
+        if pyth_price_value < 0 {
+            return Err(error!(BetError::NegativePythPrice));
+        }
+
+        let mut adjusted_price = pyth_price_value as u64;
+        let our_price_decimals: i32 = 6;
+        if pyth_exponent < 0 {
+            let se = our_price_decimals - pyth_exponent.abs();
+            if se < 0 {
+                for _ in 0..se.abs() {
+                    adjusted_price /= 10;
+                }
+            } else if se > 0 {
+                for _ in 0..se {
+                    adjusted_price = adjusted_price
+                        .checked_mul(10)
+                        .ok_or(BetError::PriceCalculationOverflow)?;
+                }
+            }
+        } else if pyth_exponent == 0 && our_price_decimals > 0 {
+            for _ in 0..our_price_decimals {
+                adjusted_price = adjusted_price
+                    .checked_mul(10)
+                    .ok_or(BetError::PriceCalculationOverflow)?;
+            }
+        } else if pyth_exponent > 0 {
+            if our_price_decimals > pyth_exponent {
+                let de = our_price_decimals - pyth_exponent;
+                for _ in 0..de {
+                    adjusted_price = adjusted_price
+                        .checked_mul(10)
+                        .ok_or(BetError::PriceCalculationOverflow)?;
+                }
+            } else if pyth_exponent > our_price_decimals {
+                let de = pyth_exponent - our_price_decimals;
+                for _ in 0..de {
+                    adjusted_price /= 10;
+                }
+            }
+        }
+
+        bet_account.user = user_authority_for_pdas;
+        bet_account.asset_name = asset_name_arg;
+        bet_account.initial_price = adjusted_price;
+        bet_account.expiry_timestamp = clock
+            .unix_timestamp
+            .checked_add(duration_seconds_arg)
+            .ok_or(BetError::TimestampOverflow)?;
+        bet_account.direction = direction_arg;
+        bet_account.amount_staked = amount_arg;
+        bet_account.resolved_price = 0;
+        bet_account.status = 0;
+
+        // Serialize modified accounts and commit them back to L1.
+        user_profile.exit(&crate::ID)?;
+        bet_account.exit(&crate::ID)?;
+        commit_accounts(
+            &ctx.accounts.payer,
+            vec![
+                &ctx.accounts.user_profile.to_account_info(),
+                &ctx.accounts.bet_account.to_account_info(),
+            ],
+            &ctx.accounts.magic_context,
+            &ctx.accounts.magic_program,
+        )?;
+
+        msg!("[ER] Bet opened and committed.");
         Ok(())
     }
 
@@ -338,6 +538,51 @@ pub struct DelegateAuthState<'info> {
     pub pda: AccountInfo<'info>, // This is the target
 }
 
+#[delegate] // MagicBlock SDK macro
+#[derive(Accounts)]
+pub struct DelegateUserProfile<'info> {
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    /// CHECK: This is the UserProfile PDA. MagicBlock's `del` attribute handles it.
+    #[account(
+        mut,
+        del,
+        seeds = [b"profile".as_ref(), payer.key().as_ref()],
+        bump
+    )]
+    pub pda: AccountInfo<'info>,
+}
+
+#[delegate] // MagicBlock SDK macro
+#[derive(Accounts)]
+pub struct DelegateActiveBet<'info> {
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    /// CHECK: This is the ActiveBet PDA. MagicBlock's `del` attribute handles it.
+    #[account(
+        mut,
+        del,
+        seeds = [ACTIVE_BET_SEED, payer.key().as_ref()],
+        bump
+    )]
+    pub pda: AccountInfo<'info>,
+}
+
+#[derive(Accounts)]
+pub struct InitActiveBet<'info> {
+    #[account(
+        init_if_needed,
+        payer = user_authority,
+        space = 8 + ACTIVE_BET_SPACE,
+        seeds = [ACTIVE_BET_SEED, user_authority.key().as_ref()],
+        bump
+    )]
+    pub active_bet: Account<'info, ActiveBet>,
+    #[account(mut)]
+    pub user_authority: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
 #[derive(Accounts)]
 #[instruction(delegation_action: u8, user_signed_message: Vec<u8>, _signature: [u8; 64])]
 pub struct ManageDelegation<'info> {
@@ -371,26 +616,53 @@ pub struct OpenBetAccounts<'info> {
         space = 8 + USER_AUTH_STATE_SPACE,
         seeds = [b"auth_state".as_ref(), user_authority_for_pdas.as_ref()],
         bump,
-        // --- THIS IS THE ONLY LINE THAT SHOULD BE DIFFERENT FROM YOUR LAST WORKING BUILD ---
-        // --- FOR THIS SPECIFIC STRUCT (OpenBetAccounts) ---
         constraint = (
-            user_auth_state.is_delegated == true || // 1. MagicBlock "Quick Bet" mode
-            ( // 2. Standard user-signed bet (UserAuthState owned by this program)
-                user_signer.key() == user_auth_state.user_authority && // Check: Signer is the PDA's authority
-                user_auth_state.is_delegated == false &&                // And not in MB delegated mode
-                user_auth_state.user_authority != Pubkey::default()     // And PDA is already initialized
+            (
+                user_signer.key() == user_auth_state.user_authority && // Signer is the PDA's authority
+                user_auth_state.is_delegated == false &&                // Must NOT be delegated for standard open_bet
+                user_auth_state.user_authority != Pubkey::default()     // PDA already initialized
             ) ||
-            user_auth_state.user_authority == Pubkey::default() // 3. Initializing UserAuthState NOW
+            user_auth_state.user_authority == Pubkey::default() // Initializing UserAuthState NOW
         ) @ BetError::NotAuthenticatedOrDelegated
     )]
     pub user_auth_state: Account<'info, UserAuthState>, // Stays Account<T>
     #[account(
-        init_if_needed, // removed `mut,`
+        init_if_needed,
         payer = user_signer,
         space = 8 + USER_PROFILE_SPACE,
         seeds = [b"profile".as_ref(), user_authority_for_pdas.as_ref()],
         bump,
         constraint = user_profile.authority == user_authority_for_pdas || user_profile.authority == Pubkey::default() @ BetError::UserProfileAuthorityMismatch
+    )]
+    pub user_profile: Account<'info, UserProfile>,
+    pub pyth_price_feed: Account<'info, PriceUpdateV2>,
+    pub system_program: Program<'info, System>,
+}
+
+#[commit]
+#[derive(Accounts)]
+#[instruction(asset_name_arg: String, direction_arg: u8, amount_arg: u64, duration_seconds_arg: i64, user_authority_for_pdas: Pubkey)]
+pub struct OpenBetErAccounts<'info> {
+    #[account(
+        mut,
+        seeds = [ACTIVE_BET_SEED, user_authority_for_pdas.as_ref()],
+        bump,
+        constraint = bet_account.user == user_authority_for_pdas @ BetError::UserProfileBetUserMismatch
+    )]
+    pub bet_account: Account<'info, ActiveBet>,
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    #[account(
+        seeds = [b"auth_state".as_ref(), user_authority_for_pdas.as_ref()],
+        bump = user_auth_state.bump,
+        constraint = user_auth_state.user_authority == user_authority_for_pdas @ BetError::UserProfileAuthorityMismatch
+    )]
+    pub user_auth_state: Account<'info, UserAuthState>,
+    #[account(
+        mut,
+        seeds = [b"profile".as_ref(), user_authority_for_pdas.as_ref()],
+        bump = user_profile.bump,
+        constraint = user_profile.authority == user_authority_for_pdas @ BetError::UserProfileAuthorityMismatch
     )]
     pub user_profile: Account<'info, UserProfile>,
     pub pyth_price_feed: Account<'info, PriceUpdateV2>,
@@ -465,4 +737,5 @@ pub enum BetError {
     #[msg("User authentication state is already prepared for MagicBlock delegation or fully delegated.")] AlreadyDelegated,
     #[msg("User authentication state is not currently in a MagicBlock delegated state.")] NotDelegated,
     #[msg("Invalid authentication signature or message provided for delegation.")] InvalidDelegationSignature,
+    #[msg("Quick Bets enabled: use open_bet_er instead of open_bet.")] UseErForQuickBets,
 }

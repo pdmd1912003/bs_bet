@@ -5,7 +5,7 @@
  * IDL can be found at `target/idl/bs_bet.json`.
  */
 export type BsBet = {
-  "address": "Atmqs3pWyhsPd9pztHvDZ1duNPACt2tbwLRpAgTxjXtt",
+  "address": "7XZh45UqwLRjZoVc88ZLZyXEi1czTiMLMjtXGfUKQi1f",
   "metadata": {
     "name": "bsBet",
     "version": "0.1.0",
@@ -90,6 +90,197 @@ export type BsBet = {
       "args": []
     },
     {
+      "name": "delegateActiveBet",
+      "discriminator": [
+        78,
+        151,
+        198,
+        210,
+        208,
+        47,
+        164,
+        86
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "bufferPda",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  117,
+                  102,
+                  102,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pda"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                96,
+                250,
+                130,
+                89,
+                85,
+                116,
+                106,
+                141,
+                39,
+                159,
+                18,
+                184,
+                87,
+                60,
+                101,
+                211,
+                204,
+                208,
+                102,
+                197,
+                240,
+                211,
+                221,
+                116,
+                72,
+                101,
+                224,
+                62,
+                252,
+                75,
+                54,
+                130
+              ]
+            }
+          }
+        },
+        {
+          "name": "delegationRecordPda",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  101,
+                  108,
+                  101,
+                  103,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pda"
+              }
+            ],
+            "program": {
+              "kind": "account",
+              "path": "delegationProgram"
+            }
+          }
+        },
+        {
+          "name": "delegationMetadataPda",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  101,
+                  108,
+                  101,
+                  103,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110,
+                  45,
+                  109,
+                  101,
+                  116,
+                  97,
+                  100,
+                  97,
+                  116,
+                  97
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pda"
+              }
+            ],
+            "program": {
+              "kind": "account",
+              "path": "delegationProgram"
+            }
+          }
+        },
+        {
+          "name": "pda",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  99,
+                  116,
+                  105,
+                  118,
+                  101,
+                  95,
+                  98,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "payer"
+              }
+            ]
+          }
+        },
+        {
+          "name": "ownerProgram",
+          "address": "7XZh45UqwLRjZoVc88ZLZyXEi1czTiMLMjtXGfUKQi1f"
+        },
+        {
+          "name": "delegationProgram",
+          "address": "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"
+        },
+        {
+          "name": "systemProgram",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "delegateAuthState",
       "discriminator": [
         72,
@@ -131,38 +322,38 @@ export type BsBet = {
             "program": {
               "kind": "const",
               "value": [
-                146,
-                252,
-                129,
-                211,
-                163,
-                94,
-                7,
-                95,
-                183,
-                221,
-                218,
-                144,
-                200,
-                84,
+                96,
+                250,
+                130,
                 89,
-                48,
-                82,
-                57,
-                109,
-                170,
+                85,
+                116,
+                106,
+                141,
+                39,
+                159,
+                18,
+                184,
+                87,
+                60,
+                101,
+                211,
+                204,
+                208,
                 102,
-                155,
-                181,
-                154,
-                21,
-                6,
-                153,
-                100,
-                216,
-                225,
-                110,
-                121
+                197,
+                240,
+                211,
+                221,
+                116,
+                72,
+                101,
+                224,
+                62,
+                252,
+                75,
+                54,
+                130
               ]
             }
           }
@@ -267,11 +458,255 @@ export type BsBet = {
         },
         {
           "name": "ownerProgram",
-          "address": "Atmqs3pWyhsPd9pztHvDZ1duNPACt2tbwLRpAgTxjXtt"
+          "address": "7XZh45UqwLRjZoVc88ZLZyXEi1czTiMLMjtXGfUKQi1f"
         },
         {
           "name": "delegationProgram",
           "address": "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"
+        },
+        {
+          "name": "systemProgram",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "delegateUserProfile",
+      "discriminator": [
+        205,
+        1,
+        92,
+        198,
+        12,
+        90,
+        20,
+        133
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "bufferPda",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  117,
+                  102,
+                  102,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pda"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                96,
+                250,
+                130,
+                89,
+                85,
+                116,
+                106,
+                141,
+                39,
+                159,
+                18,
+                184,
+                87,
+                60,
+                101,
+                211,
+                204,
+                208,
+                102,
+                197,
+                240,
+                211,
+                221,
+                116,
+                72,
+                101,
+                224,
+                62,
+                252,
+                75,
+                54,
+                130
+              ]
+            }
+          }
+        },
+        {
+          "name": "delegationRecordPda",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  101,
+                  108,
+                  101,
+                  103,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pda"
+              }
+            ],
+            "program": {
+              "kind": "account",
+              "path": "delegationProgram"
+            }
+          }
+        },
+        {
+          "name": "delegationMetadataPda",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  101,
+                  108,
+                  101,
+                  103,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110,
+                  45,
+                  109,
+                  101,
+                  116,
+                  97,
+                  100,
+                  97,
+                  116,
+                  97
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pda"
+              }
+            ],
+            "program": {
+              "kind": "account",
+              "path": "delegationProgram"
+            }
+          }
+        },
+        {
+          "name": "pda",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  102,
+                  105,
+                  108,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "payer"
+              }
+            ]
+          }
+        },
+        {
+          "name": "ownerProgram",
+          "address": "7XZh45UqwLRjZoVc88ZLZyXEi1czTiMLMjtXGfUKQi1f"
+        },
+        {
+          "name": "delegationProgram",
+          "address": "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"
+        },
+        {
+          "name": "systemProgram",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "initActiveBet",
+      "docs": [
+        "Create (or ensure) the per-user ActiveBet PDA exists on L1.",
+        "This must be called before using `open_bet_er`, because ER cannot create new accounts."
+      ],
+      "discriminator": [
+        158,
+        191,
+        11,
+        205,
+        154,
+        127,
+        96,
+        110
+      ],
+      "accounts": [
+        {
+          "name": "activeBet",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  99,
+                  116,
+                  105,
+                  118,
+                  101,
+                  95,
+                  98,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "userAuthority"
+              }
+            ]
+          }
+        },
+        {
+          "name": "userAuthority",
+          "writable": true,
+          "signer": true
         },
         {
           "name": "systemProgram",
@@ -443,6 +878,145 @@ export type BsBet = {
         {
           "name": "systemProgram",
           "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "assetNameArg",
+          "type": "string"
+        },
+        {
+          "name": "directionArg",
+          "type": "u8"
+        },
+        {
+          "name": "amountArg",
+          "type": "u64"
+        },
+        {
+          "name": "durationSecondsArg",
+          "type": "i64"
+        },
+        {
+          "name": "userAuthorityForPdas",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "openBetEr",
+      "docs": [
+        "Quick Bets (ER) path.",
+        "This instruction is intended to be sent via MagicBlock RPC, after the user's PDAs are delegated."
+      ],
+      "discriminator": [
+        72,
+        40,
+        74,
+        58,
+        174,
+        8,
+        195,
+        146
+      ],
+      "accounts": [
+        {
+          "name": "betAccount",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  99,
+                  116,
+                  105,
+                  118,
+                  101,
+                  95,
+                  98,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "userAuthorityForPdas"
+              }
+            ]
+          }
+        },
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "userAuthState",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  117,
+                  116,
+                  104,
+                  95,
+                  115,
+                  116,
+                  97,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "userAuthorityForPdas"
+              }
+            ]
+          }
+        },
+        {
+          "name": "userProfile",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  102,
+                  105,
+                  108,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "userAuthorityForPdas"
+              }
+            ]
+          }
+        },
+        {
+          "name": "pythPriceFeed"
+        },
+        {
+          "name": "systemProgram",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "magicProgram",
+          "address": "Magic11111111111111111111111111111111111111"
+        },
+        {
+          "name": "magicContext",
+          "writable": true,
+          "address": "MagicContext1111111111111111111111111111111"
         }
       ],
       "args": [
@@ -779,6 +1353,11 @@ export type BsBet = {
       "code": 6018,
       "name": "invalidDelegationSignature",
       "msg": "Invalid authentication signature or message provided for delegation."
+    },
+    {
+      "code": 6019,
+      "name": "useErForQuickBets",
+      "msg": "Quick Bets enabled: use open_bet_er instead of open_bet."
     }
   ],
   "types": [

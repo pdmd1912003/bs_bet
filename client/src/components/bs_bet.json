@@ -1,5 +1,5 @@
 {
-  "address": "Atmqs3pWyhsPd9pztHvDZ1duNPACt2tbwLRpAgTxjXtt",
+  "address": "7XZh45UqwLRjZoVc88ZLZyXEi1czTiMLMjtXGfUKQi1f",
   "metadata": {
     "name": "bs_bet",
     "version": "0.1.0",
@@ -84,6 +84,197 @@
       "args": []
     },
     {
+      "name": "delegate_active_bet",
+      "discriminator": [
+        78,
+        151,
+        198,
+        210,
+        208,
+        47,
+        164,
+        86
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "buffer_pda",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  117,
+                  102,
+                  102,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pda"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                96,
+                250,
+                130,
+                89,
+                85,
+                116,
+                106,
+                141,
+                39,
+                159,
+                18,
+                184,
+                87,
+                60,
+                101,
+                211,
+                204,
+                208,
+                102,
+                197,
+                240,
+                211,
+                221,
+                116,
+                72,
+                101,
+                224,
+                62,
+                252,
+                75,
+                54,
+                130
+              ]
+            }
+          }
+        },
+        {
+          "name": "delegation_record_pda",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  101,
+                  108,
+                  101,
+                  103,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pda"
+              }
+            ],
+            "program": {
+              "kind": "account",
+              "path": "delegation_program"
+            }
+          }
+        },
+        {
+          "name": "delegation_metadata_pda",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  101,
+                  108,
+                  101,
+                  103,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110,
+                  45,
+                  109,
+                  101,
+                  116,
+                  97,
+                  100,
+                  97,
+                  116,
+                  97
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pda"
+              }
+            ],
+            "program": {
+              "kind": "account",
+              "path": "delegation_program"
+            }
+          }
+        },
+        {
+          "name": "pda",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  99,
+                  116,
+                  105,
+                  118,
+                  101,
+                  95,
+                  98,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "payer"
+              }
+            ]
+          }
+        },
+        {
+          "name": "owner_program",
+          "address": "7XZh45UqwLRjZoVc88ZLZyXEi1czTiMLMjtXGfUKQi1f"
+        },
+        {
+          "name": "delegation_program",
+          "address": "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "delegate_auth_state",
       "discriminator": [
         72,
@@ -125,38 +316,38 @@
             "program": {
               "kind": "const",
               "value": [
-                146,
-                252,
-                129,
-                211,
-                163,
-                94,
-                7,
-                95,
-                183,
-                221,
-                218,
-                144,
-                200,
-                84,
+                96,
+                250,
+                130,
                 89,
-                48,
-                82,
-                57,
-                109,
-                170,
+                85,
+                116,
+                106,
+                141,
+                39,
+                159,
+                18,
+                184,
+                87,
+                60,
+                101,
+                211,
+                204,
+                208,
                 102,
-                155,
-                181,
-                154,
-                21,
-                6,
-                153,
-                100,
-                216,
-                225,
-                110,
-                121
+                197,
+                240,
+                211,
+                221,
+                116,
+                72,
+                101,
+                224,
+                62,
+                252,
+                75,
+                54,
+                130
               ]
             }
           }
@@ -261,11 +452,255 @@
         },
         {
           "name": "owner_program",
-          "address": "Atmqs3pWyhsPd9pztHvDZ1duNPACt2tbwLRpAgTxjXtt"
+          "address": "7XZh45UqwLRjZoVc88ZLZyXEi1czTiMLMjtXGfUKQi1f"
         },
         {
           "name": "delegation_program",
           "address": "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "delegate_user_profile",
+      "discriminator": [
+        205,
+        1,
+        92,
+        198,
+        12,
+        90,
+        20,
+        133
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "buffer_pda",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  117,
+                  102,
+                  102,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pda"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                96,
+                250,
+                130,
+                89,
+                85,
+                116,
+                106,
+                141,
+                39,
+                159,
+                18,
+                184,
+                87,
+                60,
+                101,
+                211,
+                204,
+                208,
+                102,
+                197,
+                240,
+                211,
+                221,
+                116,
+                72,
+                101,
+                224,
+                62,
+                252,
+                75,
+                54,
+                130
+              ]
+            }
+          }
+        },
+        {
+          "name": "delegation_record_pda",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  101,
+                  108,
+                  101,
+                  103,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pda"
+              }
+            ],
+            "program": {
+              "kind": "account",
+              "path": "delegation_program"
+            }
+          }
+        },
+        {
+          "name": "delegation_metadata_pda",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  101,
+                  108,
+                  101,
+                  103,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110,
+                  45,
+                  109,
+                  101,
+                  116,
+                  97,
+                  100,
+                  97,
+                  116,
+                  97
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pda"
+              }
+            ],
+            "program": {
+              "kind": "account",
+              "path": "delegation_program"
+            }
+          }
+        },
+        {
+          "name": "pda",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  102,
+                  105,
+                  108,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "payer"
+              }
+            ]
+          }
+        },
+        {
+          "name": "owner_program",
+          "address": "7XZh45UqwLRjZoVc88ZLZyXEi1czTiMLMjtXGfUKQi1f"
+        },
+        {
+          "name": "delegation_program",
+          "address": "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "init_active_bet",
+      "docs": [
+        "Create (or ensure) the per-user ActiveBet PDA exists on L1.",
+        "This must be called before using `open_bet_er`, because ER cannot create new accounts."
+      ],
+      "discriminator": [
+        158,
+        191,
+        11,
+        205,
+        154,
+        127,
+        96,
+        110
+      ],
+      "accounts": [
+        {
+          "name": "active_bet",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  99,
+                  116,
+                  105,
+                  118,
+                  101,
+                  95,
+                  98,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "user_authority"
+              }
+            ]
+          }
+        },
+        {
+          "name": "user_authority",
+          "writable": true,
+          "signer": true
         },
         {
           "name": "system_program",
@@ -437,6 +872,145 @@
         {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "asset_name_arg",
+          "type": "string"
+        },
+        {
+          "name": "direction_arg",
+          "type": "u8"
+        },
+        {
+          "name": "amount_arg",
+          "type": "u64"
+        },
+        {
+          "name": "duration_seconds_arg",
+          "type": "i64"
+        },
+        {
+          "name": "user_authority_for_pdas",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "open_bet_er",
+      "docs": [
+        "Quick Bets (ER) path.",
+        "This instruction is intended to be sent via MagicBlock RPC, after the user's PDAs are delegated."
+      ],
+      "discriminator": [
+        72,
+        40,
+        74,
+        58,
+        174,
+        8,
+        195,
+        146
+      ],
+      "accounts": [
+        {
+          "name": "bet_account",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  99,
+                  116,
+                  105,
+                  118,
+                  101,
+                  95,
+                  98,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "user_authority_for_pdas"
+              }
+            ]
+          }
+        },
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "user_auth_state",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  117,
+                  116,
+                  104,
+                  95,
+                  115,
+                  116,
+                  97,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "user_authority_for_pdas"
+              }
+            ]
+          }
+        },
+        {
+          "name": "user_profile",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  102,
+                  105,
+                  108,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "user_authority_for_pdas"
+              }
+            ]
+          }
+        },
+        {
+          "name": "pyth_price_feed"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "magic_program",
+          "address": "Magic11111111111111111111111111111111111111"
+        },
+        {
+          "name": "magic_context",
+          "writable": true,
+          "address": "MagicContext1111111111111111111111111111111"
         }
       ],
       "args": [
@@ -773,6 +1347,11 @@
       "code": 6018,
       "name": "InvalidDelegationSignature",
       "msg": "Invalid authentication signature or message provided for delegation."
+    },
+    {
+      "code": 6019,
+      "name": "UseErForQuickBets",
+      "msg": "Quick Bets enabled: use open_bet_er instead of open_bet."
     }
   ],
   "types": [

@@ -31,6 +31,15 @@ const PROGRAM_ID = new anchor.web3.PublicKey(
 // MagicBlock RPC Endpoint
 const MAGICBLOCK_RPC_ENDPOINT = process.env.NEXT_PUBLIC_MAGICBLOCK_RPC_URL || "https://devnet.magicblock.app/";
 
+// These match the fixed addresses emitted into the IDL by the MagicBlock macros.
+// Allow overriding via env vars in case MagicBlock changes per cluster.
+const MAGICBLOCK_MAGIC_PROGRAM_ID = new anchor.web3.PublicKey(
+    process.env.NEXT_PUBLIC_MAGICBLOCK_MAGIC_PROGRAM_ID || "Magic11111111111111111111111111111111111111"
+);
+const MAGICBLOCK_MAGIC_CONTEXT_ID = new anchor.web3.PublicKey(
+    process.env.NEXT_PUBLIC_MAGICBLOCK_MAGIC_CONTEXT_ID || "MagicContext1111111111111111111111111111111"
+);
+
 interface DisplayableActiveBet extends ClientActiveBet { publicKey: string; }
 
 // First, let's add a utility function at the beginning of the file after imports
@@ -110,6 +119,7 @@ export default function BetForm() {
 
     const [userProfilePda, setUserProfilePda] = useState<PublicKey | null>(null);
     const [userAuthStatePda, setUserAuthStatePda] = useState<PublicKey | null>(null);
+    const [activeBetPda, setActiveBetPda] = useState<PublicKey | null>(null);
     const [profileData, setProfileData] = useState<Record<string, unknown> | null>(null);
     const [authStateData, setAuthStateData] = useState<Record<string, unknown> | null>(null);
     const [displayableBets, setDisplayableBets] = useState<DisplayableActiveBet[]>([]);
@@ -184,6 +194,11 @@ export default function BetForm() {
                     [Buffer.from("auth_state"), userAuthority.toBuffer()], l1Program.programId
                 );
                 setUserAuthStatePda(authStatePdaRet);
+
+                const [activeBetPdaRet] = anchor.web3.PublicKey.findProgramAddressSync(
+                    [Buffer.from("active_bet"), userAuthority.toBuffer()], l1Program.programId
+                );
+                setActiveBetPda(activeBetPdaRet);
                 setActionFeedbackMessage('PDAs derived.');
             } catch (error) {
                 console.error("Error deriving PDAs:", error);
@@ -334,7 +349,7 @@ export default function BetForm() {
     }, [l1Program, userAuthStatePda]);
 
     const handleDelegate = async () => {
-        if (!l1Program || !userAuthority || !userAuthStatePda || !userWallet?.signMessage) {
+        if (!l1Program || !userAuthority || !userAuthStatePda || !userProfilePda || !activeBetPda || !userWallet?.signMessage) {
             setActionFeedbackMessage("Wallet/Program not ready for delegation.");
             setLoading(false); return;
         }
@@ -402,6 +417,20 @@ export default function BetForm() {
                         setActionFeedbackMessage("Ready for MagicBlock SDK. Attempting MagicBlock delegation (Step 2)...");
                         await l1Program.methods.delegateAuthState()
                             .accounts({ payer: userAuthority, pda: userAuthStatePda } as any)
+                            .rpc({ commitment: "confirmed" });
+
+                        // Also delegate UserProfile so ER can write points.
+                        const delegateUserProfile = (l1Program.methods as any).delegateUserProfile;
+                        if (typeof delegateUserProfile !== "function") {
+                            setActionFeedbackMessage(
+                                "Client IDL is out of date (missing delegateUserProfile). Run `anchor build` and copy target/idl + target/types into client/src/components."
+                            );
+                            setLoading(false);
+                            console.groupEnd();
+                            return;
+                        }
+                        await delegateUserProfile.call(l1Program.methods)
+                            .accounts({ payer: userAuthority, pda: userProfilePda } as any)
                             .rpc({ commitment: "confirmed" });
 
                         const postDelegateInfo = await l1Program.provider.connection.getAccountInfo(userAuthStatePda);
@@ -491,7 +520,65 @@ export default function BetForm() {
             const postDelegateInfo2 = await l1Program.provider.connection.getAccountInfo(userAuthStatePda);
             console.log("post-delegateAuthState owner:", postDelegateInfo2?.owner?.toBase58() ?? "<null>");
 
-            setActionFeedbackMessage(`Successfully Enabled Quick Bets! Tx: ${delegateTx}`);
+            // Ensure the per-user ActiveBet PDA exists on L1 before delegation.
+            setActionFeedbackMessage("Preparing ActiveBet PDA on L1 (Step 2.5)...");
+            const initActiveBet = (l1Program.methods as any).initActiveBet;
+            if (typeof initActiveBet !== "function") {
+                setActionFeedbackMessage(
+                    "Client IDL is out of date (missing initActiveBet). Rebuild IDL/types and copy into client/src/components."
+                );
+                setLoading(false);
+                console.groupEnd();
+                return;
+            }
+            await initActiveBet.call(l1Program.methods)
+                .accounts({
+                    activeBet: activeBetPda,
+                    userAuthority: userAuthority,
+                    systemProgram: SystemProgram.programId,
+                } as any)
+                .rpc({ commitment: "confirmed" });
+
+            setActionFeedbackMessage("Delegating UserProfile to MagicBlock (Step 3)...");
+            const delegateUserProfile = (l1Program.methods as any).delegateUserProfile;
+            if (typeof delegateUserProfile !== "function") {
+                setActionFeedbackMessage(
+                    "Client IDL is out of date (missing delegateUserProfile). Run `anchor build` and copy target/idl + target/types into client/src/components."
+                );
+                setLoading(false);
+                console.groupEnd();
+                return;
+            }
+
+            const delegateProfileTx = await delegateUserProfile.call(l1Program.methods)
+                .accounts({ payer: userAuthority, pda: userProfilePda } as any)
+                .rpc({ commitment: "confirmed" });
+
+            const postProfileInfo = await l1Program.provider.connection.getAccountInfo(userProfilePda);
+            console.log("post-delegateUserProfile owner:", postProfileInfo?.owner?.toBase58() ?? "<null>");
+
+            setActionFeedbackMessage("Delegating ActiveBet PDA to MagicBlock (Step 4)...");
+            const delegateActiveBet = (l1Program.methods as any).delegateActiveBet;
+            if (typeof delegateActiveBet !== "function") {
+                setActionFeedbackMessage(
+                    "Client IDL is out of date (missing delegateActiveBet). Rebuild IDL/types and copy into client/src/components."
+                );
+                setLoading(false);
+                console.groupEnd();
+                return;
+            }
+
+            const delegateActiveBetTx = await delegateActiveBet.call(l1Program.methods)
+                .accounts({ payer: userAuthority, pda: activeBetPda } as any)
+                .rpc({ commitment: "confirmed" });
+            console.log("delegateActiveBet tx:", delegateActiveBetTx);
+
+            const postActiveBetInfo = await l1Program.provider.connection.getAccountInfo(activeBetPda);
+            console.log("post-delegateActiveBet owner:", postActiveBetInfo?.owner?.toBase58() ?? "<null>");
+
+            setActionFeedbackMessage(
+                `Successfully Enabled Quick Bets! Auth: ${delegateTx} / Profile: ${delegateProfileTx} / ActiveBet: ${delegateActiveBetTx}`
+            );
             // After delegateAuthState, owner has changed.
             // Optimistically update client state to reflect delegation.
             // A "true" fetch would require getAccountInfo and manual decode of MB's data if any.
@@ -558,6 +645,8 @@ export default function BetForm() {
                 .accounts({
                     userAuthority: userAuthority,
                     userAuthStateToUndelegate: userAuthStatePda,
+                    magicProgram: MAGICBLOCK_MAGIC_PROGRAM_ID,
+                    magicContext: MAGICBLOCK_MAGIC_CONTEXT_ID,
                 } as any)
                 .transaction();
 
@@ -669,11 +758,10 @@ export default function BetForm() {
 
     // --- MODIFIED: Handle Bet Placement ---
     const handleBet = async (direction: "UP" | "DOWN") => { // Parameter is 'direction'
-        // Determine which program client and provider to use
-        const currentProgram = isDelegated && ephemeralProgram ? ephemeralProgram : l1Program;
-        const currentProvider = isDelegated && ephemeralProviderRef.current ? ephemeralProviderRef.current : l1Provider;
+        const useEr = Boolean(isDelegated && ephemeralProgram && ephemeralProviderRef.current);
+        const currentProgram = useEr ? ephemeralProgram : l1Program;
 
-        if (!currentProgram || !userAuthority || !userProfilePda || !userAuthStatePda || !currentProvider) {
+        if (!currentProgram || !userAuthority || !userProfilePda || !userAuthStatePda) {
             setActionFeedbackMessage('Wallet/Program not ready for bet.'); return;
         }
         if (isProfileInitialized && userPoints < fixedBetAmount) {
@@ -686,11 +774,17 @@ export default function BetForm() {
         const assetNameArg: string = "SOL/USD";
         const amountArg = new BN(fixedBetAmount);
         const durationSecondsArg = new BN(1 * 60); // 1 minute for testing
-        const betAccountKeypair = Keypair.generate();
+        const betAccountKeypair = !useEr ? Keypair.generate() : null;
+        const betAccountPubkey = useEr ? activeBetPda : betAccountKeypair?.publicKey;
+        if (!betAccountPubkey) {
+            setActionFeedbackMessage("ActiveBet PDA not ready.");
+            setLoading(false);
+            return;
+        }
 
         try {
             console.group(`[bs_bet] openBet (${direction})`);
-            console.log(`mode: ${isDelegated && ephemeralProgram ? "MagicBlock (ephemeral RPC)" : "L1"}`);
+            console.log(`mode: ${useEr ? "MagicBlock (ephemeral RPC / ER)" : "L1"}`);
             console.log("userAuthority:", userAuthority.toBase58());
             console.log("userProfilePda:", userProfilePda.toBase58());
             console.log("userAuthStatePda:", userAuthStatePda.toBase58());
@@ -702,40 +796,67 @@ export default function BetForm() {
                 console.log("UserAuthState owner (L1 view): <skipped - l1Program not ready>");
             }
 
-            const methodsBuilder = currentProgram.methods
-                .openBet( // Call to the Rust program's open_bet instruction
-                    assetNameArg,
-                    directionArg, // --- THIS IS THE CORRECTED VARIABLE ---
-                    amountArg,
-                    durationSecondsArg,
-                    userAuthority // user_authority_for_pdas
-                )
-                .accounts({
-                    betAccount: betAccountKeypair.publicKey,
-                    userSigner: userAuthority,
-                    userAuthState: userAuthStatePda,
-                    userProfile: userProfilePda,
-                    pythPriceFeed: PYTH_SOL_USD_PRICE_ACCOUNT,
-                    systemProgram: SystemProgram.programId,
-                } as any)
-                .signers([betAccountKeypair]);
+            if (useEr) {
+                const openBetEr = (currentProgram.methods as any).openBetEr;
+                if (typeof openBetEr !== "function") {
+                    throw new Error(
+                        "Client IDL is out of date (missing openBetEr). Run `anchor build` and copy target/idl + target/types into client/src/components."
+                    );
+                }
+            }
+
+            const methodsBuilder = useEr
+                ? (currentProgram.methods as any)
+                      .openBetEr(
+                          assetNameArg,
+                          directionArg,
+                          amountArg,
+                          durationSecondsArg,
+                          userAuthority // user_authority_for_pdas
+                      )
+                      .accounts({
+                          betAccount: betAccountPubkey,
+                          payer: userAuthority,
+                          userAuthState: userAuthStatePda,
+                          userProfile: userProfilePda,
+                          pythPriceFeed: PYTH_SOL_USD_PRICE_ACCOUNT,
+                          systemProgram: SystemProgram.programId,
+                          magicProgram: MAGICBLOCK_MAGIC_PROGRAM_ID,
+                          magicContext: MAGICBLOCK_MAGIC_CONTEXT_ID,
+                      } as any)
+                      .signers([])
+                : currentProgram.methods
+                      .openBet(
+                          assetNameArg,
+                          directionArg,
+                          amountArg,
+                          durationSecondsArg,
+                          userAuthority // user_authority_for_pdas
+                      )
+                      .accounts({
+                          betAccount: betAccountPubkey,
+                          userSigner: userAuthority,
+                          userAuthState: userAuthStatePda,
+                          userProfile: userProfilePda,
+                          pythPriceFeed: PYTH_SOL_USD_PRICE_ACCOUNT,
+                          systemProgram: SystemProgram.programId,
+                      } as any)
+                      .signers(betAccountKeypair ? [betAccountKeypair] : []);
 
             let txSignature: string;
-            if (isDelegated && ephemeralProviderRef.current && currentProgram === ephemeralProgram) {
-                console.log("Sending TX via Ephemeral Provider's RPC method");
-                txSignature = await methodsBuilder.rpc({ commitment: "confirmed" });
-            } else {
-                console.log("Sending TX via L1 Provider's RPC method");
-                txSignature = await methodsBuilder.rpc({ commitment: "confirmed" });
-            }
+            console.log(`Sending TX via ${useEr ? "Ephemeral" : "L1"} Provider's RPC method`);
+            txSignature = await methodsBuilder.rpc({ commitment: "confirmed" });
 
             console.log("openBet tx:", txSignature);
 
             setFeedback(`Bet ${direction} Placed!`);
-            setActionFeedbackMessage(`Tx: ${txSignature} via ${isDelegated && ephemeralProgram ? "MB" : "L1"}`);
+            setActionFeedbackMessage(`Tx: ${txSignature} via ${useEr ? "MB/ER" : "L1"}`);
             // ... (localStorage, fetchUserProfileData, fetchAndDisplayActiveBets using l1Program) ...
             const currentBets = JSON.parse(localStorage.getItem(`activeBets_${userAuthority.toBase58()}`) || '[]');
-            localStorage.setItem(`activeBets_${userAuthority.toBase58()}`, JSON.stringify([...currentBets, betAccountKeypair.publicKey.toBase58()]));
+            const betKey = betAccountPubkey.toBase58();
+            if (!currentBets.includes(betKey)) {
+                localStorage.setItem(`activeBets_${userAuthority.toBase58()}`, JSON.stringify([...currentBets, betKey]));
+            }
             await fetchUserProfileData(); // Assuming this uses l1Program to get ground truth
             await fetchAndDisplayActiveBets(); // Assuming this uses l1Program
 
